@@ -277,7 +277,7 @@ class WhiteCapsuleRenameBar(QWidget):
         layout.addWidget(self.file_tag)
 
         self.input_edit = QLineEdit()
-        self.input_edit.setPlaceholderText("输入后缀如 555 回车 -> 000（555).jpg")
+        self.input_edit.setPlaceholderText("输入后缀如 555 回车 -> 000（555）.jpg")
         self.input_edit.returnPressed.connect(self.confirm_rename)
         layout.addWidget(self.input_edit, 1)
 
@@ -380,11 +380,13 @@ class WhiteCapsuleRenameBar(QWidget):
         stem = orig_path.stem
         ext = orig_path.suffix
         inner = s
-        if (s.startswith("（") or s.startswith("(")) and (s.endswith("）") or s.endswith(")")):
-            inner = s[1:-1].strip()
-        elif s.startswith("（") or s.startswith("("):
-            inner = s[1:].strip()
-        return f"{stem}（{inner}){ext}"
+        while inner and inner[0] in ("（", "("):
+            inner = inner[1:].strip()
+        while inner and inner[-1] in ("）", ")"):
+            inner = inner[:-1].strip()
+        if not inner:
+            return orig_path.name
+        return f"{stem}（{inner}）{ext}"
 
     def confirm_rename(self):
         raw = self.input_edit.text().strip()
