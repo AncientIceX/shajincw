@@ -675,48 +675,10 @@ class ShajinFoxPet(QWidget):
 
     def update_window_mask(self):
         """
-        动态计算非透明交互区域的 QBitmap 窗口掩码：
-        - 只有狐狸身体（或收纳时露出的半颗脑袋）、可见菜单、便便、改名输入框接收鼠标事件；
-        - 其余透明区域 100% 穿透点击到底层 Windows 桌面图标与窗口！
-        - 同时保证收纳状态下露出的脑袋 100% 能接收鼠标悬停唤出事件！
+        Windows 下 WA_TranslucentBackground 原生支持 alpha=0 像素穿透点击且具备平滑抗锯齿边缘；
+        不再使用 1-bit QBitmap 裁剪掩码，避免 Windows 窗口边缘产生锯齿亮边。
         """
-        bmp = QBitmap(self.size())
-        bmp.fill(Qt.GlobalColor.color0)
-        p = QPainter(bmp)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(Qt.GlobalColor.color1)
-
-        s = self.scale_factor
-        cx, cy, fw, fh = self._fox_anchor()
-
-        # 1. 狐狸本体热区（包含收纳状态下露出底部的脑袋与双耳区域）
-        fox_rect = QRectF(cx - fw * 0.48, cy - fh * 0.50, fw * 0.96, fh * 0.98)
-        p.drawRoundedRect(fox_rect, 40 * s, 40 * s)
-
-        # 2. 若功能按钮菜单可见，加入按钮与胶囊热区
-        if self.menu_visible_prog > 0.05 and self.dock_sink_progress < 0.25:
-            for rect in self._get_circular_button_rects().values():
-                p.drawEllipse(rect.adjusted(-4, -4, 4, 4))
-            if not self.hide_all_text:
-                p.drawRoundedRect(self._get_status_strip_rect().adjusted(-4, -4, 4, 4), 12, 12)
-
-        # 3. 若小型食物菜单打开，加入食物菜单卡片热区
-        if self.food_menu_open and self.food_menu_prog > 0.05:
-            p.drawRoundedRect(self._get_food_menu_rect().adjusted(-6, -6, 6, 6), 18, 18)
-
-        # 4. 地面便便热区
-        for poop in self.poops:
-            px = cx + poop["rx"] * s
-            py = cy + poop["ry"] * s
-            p.drawEllipse(QPointF(px, py), 22 * s, 22 * s)
-
-        # 5. 白圆角胶囊改名条热区
-        if self.rename_bar.isVisible():
-            p.drawRoundedRect(QRectF(self.rename_bar.geometry()).adjusted(-4, -4, 4, 4), 18, 18)
-
-        p.end()
-        self.setMask(bmp)
+        return
 
     # ==========================================================================
     # 屏幕底部自动吸附与两段式探头收纳系统（核心需求四）
