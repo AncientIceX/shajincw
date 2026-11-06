@@ -584,6 +584,11 @@ class ShajinFoxPet(QWidget):
 
         sprite_file = resource_path("assets/pet_sprite.png")
         self.pet_pixmap = QPixmap(str(sprite_file))
+        self.snack_pixmaps: dict[str, QPixmap] = {}
+        for k in ("cookie", "salmon", "peach", "cocoa"):
+            sp = resource_path(f"assets/snack_{k}.png")
+            if sp.exists():
+                self.snack_pixmaps[k] = QPixmap(str(sp))
 
         self._init_window()
         self._init_tray()
@@ -1762,9 +1767,19 @@ class ShajinFoxPet(QWidget):
         painter.restore()
 
     def _draw_snack_illustration(self, painter: QPainter, key: str, center: QPointF, r: float):
-        """绘制参考图同款 4 种点心扁平插画图标：小饼干、三文鱼、甜桃子、热可可"""
+        """优先绘制高精度 3D 拟物点心图标 PNG（小饼干、三文鱼、甜桃子、热可可）"""
         painter.save()
         cx, cy = center.x(), center.y()
+        pm = self.snack_pixmaps.get(key)
+        if pm is not None and not pm.isNull():
+            sz = r * 2.45
+            painter.drawPixmap(
+                QRectF(cx - sz * 0.5, cy - sz * 0.5, sz, sz),
+                pm,
+                QRectF(0, 0, pm.width(), pm.height()),
+            )
+            painter.restore()
+            return
 
         if key == "cookie":
             # 小饼干：暖棕黄曲奇 + 巧克力碎点
