@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-砂金小狐狸桌宠 (shajincw) v3.0 · 完整 UI 与交互升级版
+砂金小狐狸桌宠 (shajincw) v4.0 · 住在桌面上的小狐狸
 ================================================================================
-核心特性：
-1. 低饱和日系治愈 UI：奶油白、浅薄荷绿、香槟金、柔和紫配色，磨砂质感圆角卡片与统一矢量线条图标。
-2. 紧凑透明窗口 + 精确透明区域鼠标穿透（通过 QBitmap 掩码裁剪，绝无大面积透明窗口遮挡桌面）。
-3. 统一优先级状态机程序化动画（单张 PNG 驱动）：
-   优先级：文件拖放 > 手动拖动 > 喂食互动 > 点击反馈 > 探头收纳 > 待机动画。
-4. 弹出式小型精致食物菜单 + 6 阶段顺序贝塞尔曲线喂食动画 + 真实肠胃消化转便意排便系统。
-5. 屏幕底部自动吸附与两段式探头收纳（保持原尺寸下沉裁剪仅露半颗脑袋与耳朵，悬停先轻探停顿再完整探出）。
-6. 文件拖放添加后缀：悬停抬起+金色虚线光环+「交给我吧～」气泡，同名冲突与非法字符安全保护。
-7. 空闲自适应降帧节能机制：活跃动画 60FPS 丝滑过渡，待机静止自动降至 24FPS 低 CPU 占用。
+v4.0 核心特性：
+1. 1:1 还原参考图「奶油白 · 浅薄荷绿 · 香槟金」轻拟物磨砂 UI：
+   - 狐狸正下方悬浮全圆角胶囊工具栏（4 个线性图标：🍴喂食、Aa改名、⊻底部收纳、···大小滑块/更多）。
+   - 右下角同款「今天想吃点什么？」1×4 横向点心卡片（小饼干、三文鱼、甜桃子、热可可）。
+   - 右上角同款「把文件交给我」卡片（含原文件名 / 改名后实时预览表、「再想一下」与浅薄荷绿「确认改名」胶囊按钮）。
+2. 极简文件重命名：直接在原文件名（不含扩展名）后面原样追加输入内容（输入什么就加什么，不乱套壳）。
+3. 滑块无级调节大小 + 更小巧的尺寸下限：
+   - 提供丝滑的悬浮拖动滑块（25% ~ 160%），最小可缩至约 45px 迷你尺寸，默认尺寸也更精致。
+4. 屏幕底部自动吸附与两段式探头收纳（保持原尺寸下沉裁剪，仅露两只耳朵与紫眼睛上半张脸）。
+5. 真实进食消化排便生理循环 + 6 阶段贝塞尔喂食动画 + 零荧光纯净原画立绘。
 """
 
 from __future__ import annotations
@@ -38,7 +39,6 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QAction,
-    QBitmap,
     QColor,
     QCursor,
     QDragEnterEvent,
@@ -58,107 +58,93 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMenu,
     QPushButton,
+    QSlider,
     QSystemTrayIcon,
+    QVBoxLayout,
     QWidget,
 )
 
 
 def resource_path(rel_path: str) -> Path:
-    """支持 PyInstaller 单文件打包后的资源路径解析"""
     if hasattr(sys, "_MEIPASS"):
         return Path(sys._MEIPASS) / rel_path
     return Path(__file__).resolve().parent / rel_path
 
 
-STATE_FILE = Path.home() / ".shajincw_pet_v3.json"
+STATE_FILE = Path.home() / ".shajincw_pet_v4.json"
 
 
 # ==============================================================================
-# 集中式视觉与动画配置 (Theme & AnimConfig)
+# 集中式视觉与动画配置（严格复刻参考设计图配色）
 # ==============================================================================
 class Theme:
-    """日系治愈系低饱和配色（奶油白、浅薄荷绿、香槟金、柔和紫、深棕紫描边）"""
-    CREAM_WHITE     = QColor(253, 250, 243, 244)  # #FDFAF3 奶油白磨砂底
-    CREAM_WARM      = QColor(248, 241, 229, 240)  # #F8F1E5 暖奶油底
-    MINT_LIGHT      = QColor(218, 242, 236, 242)  # #DAF2EC 浅薄荷绿底
-    MINT_BORDER     = QColor(124, 198, 184, 235)  # #7CC6B8 薄荷青描边
-    MINT_ACCENT     = QColor(94, 181, 166, 255)   # #5EB5A6 柔和薄荷主色
-    CHAMPAGNE_GOLD  = QColor(236, 206, 148, 245)  # #ECCE94 香槟金
-    CHAMPAGNE_SOFT  = QColor(250, 239, 214, 242)  # #FAEFD6 浅香槟底
-    LAVENDER_SOFT   = QColor(238, 228, 248, 242)  # #EEE4F8 柔和浅紫底
-    LAVENDER_MAIN   = QColor(178, 142, 208, 240)  # #B28ED0 柔和紫描边/强调
-    ROSE_SOFT       = QColor(234, 162, 174, 235)  # #EAA2AE 低饱和粉
-    TEXT_PRIMARY    = QColor(82, 58, 66, 255)     # #523A42 柔和深棕紫正文
-    TEXT_SECONDARY  = QColor(136, 112, 120, 235)  # #887078 次级文字
-    SHADOW_SOFT     = QColor(68, 46, 54, 34)      # 柔和投影色
-
-    # 统一圆角与线条规范
-    PEN_WIDTH_ICON  = 1.8
-    PEN_WIDTH_CARD  = 1.5
-    RADIUS_BUBBLE   = 16.0
-    RADIUS_MENU     = 18.0
-    RADIUS_CAPSULE  = 11.0
-    BTN_CIRCLE_SIZE = 32.0
+    """奶油白 · 浅薄荷绿 · 香槟金 低饱和治愈系配色"""
+    CARD_BG         = QColor(245, 246, 243, 246)  # #F5F6F3 温润浅灰奶油白卡片底
+    TILE_BG         = QColor(250, 251, 248, 252)  # #FAFBF8 点心方块/内层亮白底
+    BORDER_WARM     = QColor(226, 228, 222, 235)  # #E2E4DE 柔和暖灰外描边
+    BORDER_INNER    = QColor(255, 255, 255, 210)  # 纯白高光内描边
+    CHAMPAGNE_LINE  = QColor(213, 211, 200, 245)  # #D5D3C8 香槟金米灰输入框描边
+    CHAMPAGNE_GOLD  = QColor(232, 198, 138, 245)  # #E8C68A 香槟金粒子/光环
+    MINT_BTN_BG     = QColor(203, 224, 214, 250)  # #CBE0D6 浅薄荷绿主按钮/高亮胶囊底
+    MINT_BTN_TEXT   = QColor(59, 77, 70, 255)     # #3B4D46 深灰绿按钮文字
+    ICON_STROKE     = QColor(92, 107, 100, 245)   # #5C6B64 胶囊工具栏线性图标色
+    TEXT_TITLE      = QColor(58, 68, 64, 255)     # #3A4440 标题深灰绿
+    TEXT_SUB        = QColor(132, 142, 136, 235)  # #848E88 辅助说明文字
+    SHADOW_COLOR    = QColor(45, 52, 48, 28)      # 柔和弥散阴影
 
 
 class AnimConfig:
-    """统一交互动画时间与参数规范"""
-    FPS_ACTIVE        = 60
-    FPS_IDLE          = 24
     DT_ACTIVE_MS      = 16
     DT_IDLE_MS        = 42
 
-    HOVER_SCALE       = 1.03        # 悬停放大 3%
-    HOVER_LIFT_PX     = -4.0        # 悬停轻微抬起
-    HOVER_DUR         = 0.20        # 按钮/角色悬停 200ms (150~250ms)
-    CLICK_DUR         = 0.16        # 点击压缩回弹 160ms (120~180ms)
-    MENU_FADE_DUR     = 0.22        # 菜单淡入缩放 220ms
-    MENU_HIDE_DELAY   = 1.60        # 鼠标移开后隐藏菜单延迟
-    BUBBLE_IN_DUR     = 0.22        # 气泡出现时长
-    BUBBLE_OUT_DUR    = 0.25        # 气泡淡出时长
+    HOVER_SCALE       = 1.03
+    HOVER_LIFT_PX     = -3.5
+    HOVER_DUR         = 0.20
+    CLICK_DUR         = 0.16
+    MENU_FADE_DUR     = 0.20
+    MENU_HIDE_DELAY   = 1.80
+    BUBBLE_IN_DUR     = 0.20
+    BUBBLE_OUT_DUR    = 0.24
 
-    # 底部吸附与两段式探头收纳参数
-    SNAP_BOTTOM_DIST  = 42          # 距离屏幕底部 30~50px 触发磁吸
-    TUCK_DURATION     = 0.48        # 收纳动画 480ms (350~600ms)
-    EXPAND_DURATION   = 0.46        # 展开动画 460ms (350~600ms)
-    PEEK_STAGE1_DUR   = 0.18        # 悬停第一阶段轻探时长
-    PEEK_PAUSE_DUR    = 0.14        # 悬停轻探短暂停顿
-    UNTUCK_HIDE_WAIT  = 1.45        # 鼠标移开后 1.45s (1~2s) 沉回底部
-    # 收纳时狐狸下沉偏移量（保持原尺寸，仅露耳朵与上半部分脑袋约 96px）
-    TUCK_SINK_RATIO   = 0.63
-    PEEK_STAGE1_RATIO = 0.49        # 第一阶段向上先探出一点
+    # 屏幕底部吸附与探头收纳参数
+    SNAP_BOTTOM_DIST  = 42
+    TUCK_DURATION     = 0.46
+    EXPAND_DURATION   = 0.45
+    PEEK_STAGE1_DUR   = 0.17
+    PEEK_PAUSE_DUR    = 0.13
+    UNTUCK_HIDE_WAIT  = 1.45
+    # 收纳时下沉比例：仅露出两只耳朵、头顶墨镜与两只紫色大眼睛（约占全身 38%）
+    TUCK_SINK_RATIO   = 0.62
+    PEEK_STAGE1_RATIO = 0.47
 
 
 class AnimPriorityState(enum.IntEnum):
-    """清晰的动画状态优先级（数值越大优先级越高，避免争夺位置或变换属性）"""
-    IDLE        = 10  # 待机呼吸 + 随机歪头/轻弹
-    TUCK_DOCK   = 20  # 底部探头收纳与展开
-    CLICK_REACT = 30  # 单击软弹反馈
-    FEEDING     = 40  # 6 阶段顺序喂食动画
-    DRAGGING    = 50  # 鼠标手动拖拽与惯性倾斜
-    FILE_DROP   = 60  # 文件拖放悬停与处理
+    IDLE        = 10
+    TUCK_DOCK   = 20
+    CLICK_REACT = 30
+    FEEDING     = 40
+    DRAGGING    = 50
+    FILE_DROP   = 60
 
 
 class DockState(enum.Enum):
-    """屏幕底部探头收纳状态机"""
-    FREE           = "free"            # 自由桌面状态
-    SINKING        = "sinking"         # 正在缓缓沉入屏幕底部
-    TUCKED         = "tucked"          # 已收纳（仅露半颗脑袋和两只耳朵）
-    PEEKING_STEP1  = "peeking_step1"   # 鼠标移到脑袋上：先向上探一点
-    PEEKING_PAUSE  = "peeking_pause"   # 短暂停顿观察
-    EXPANDING      = "expanding"       # 完整探出身体
-    EXPANDED_HOLD  = "expanded_hold"   # 完整展开保持中
+    FREE           = "free"
+    SINKING        = "sinking"
+    TUCKED         = "tucked"
+    PEEKING_STEP1  = "peeking_step1"
+    PEEKING_PAUSE  = "peeking_pause"
+    EXPANDING      = "expanding"
+    EXPANDED_HOLD  = "expanded_hold"
 
 
-# ==============================================================================
-# 缓动曲线工具函数 (Easing Functions)
-# ==============================================================================
 def ease_out_cubic(t: float) -> float:
     t = max(0.0, min(1.0, t))
     return 1.0 - (1.0 - t) ** 3
@@ -169,7 +155,7 @@ def ease_in_out_cubic(t: float) -> float:
     return 4.0 * t * t * t if t < 0.5 else 1.0 - ((-2.0 * t + 2.0) ** 3) / 2.0
 
 
-def ease_out_back(t: float, overshoot: float = 1.35) -> float:
+def ease_out_back(t: float, overshoot: float = 1.28) -> float:
     t = max(0.0, min(1.0, t))
     c3 = overshoot + 1.0
     return 1.0 + c3 * ((t - 1.0) ** 3) + overshoot * ((t - 1.0) ** 2)
@@ -177,294 +163,362 @@ def ease_out_back(t: float, overshoot: float = 1.35) -> float:
 
 def bezier_quad(p0: QPointF, p1: QPointF, p2: QPointF, t: float) -> QPointF:
     u = 1.0 - t
-    x = u * u * p0.x() + 2 * u * t * p1.x() + t * t * p2.x()
-    y = u * u * p0.y() + 2 * u * t * p1.y() + t * t * p2.y()
-    return QPointF(x, y)
+    return QPointF(
+        u * u * p0.x() + 2 * u * t * p1.x() + t * t * p2.x(),
+        u * u * p0.y() + 2 * u * t * p1.y() + t * t * p2.y(),
+    )
 
 
 # ==============================================================================
-# 角色台词与食物配置
+# 台词与参考图 4 款点心配置（小饼干、三文鱼、甜桃子、热可可）
 # ==============================================================================
 CLICK_QUOTES = [
+    "摸摸头，心情 +1",
     "唔～摸耳朵会痒的呀。",
     "所有，或者一无所有～今天运气不错哦。",
     "呼噜噜……勉强让你再摸一下下巴。",
-    "有文件要加后缀吗？直接拖给我就好～",
-    "墨镜才不会掉呢，这可是定制款！",
-    "摇摇尾巴～待在你的桌面上真舒服。",
+    "有文件要改名吗？直接拖给我就好～",
 ]
 
 IDLE_QUOTES = [
-    "（轻轻晃尾巴）今天也是稳赚不赔的一天～",
-    "盯——累了的话，记得喝口水休息一下哦。",
+    "（轻轻呼吸）今天也会陪你一起工作哦～",
+    "盯——累了的话，喝杯热可可歇会儿吧。",
     "呼噜……晒着屏幕的光有点犯困了呢。",
-    "点数是三枚砂金，好运一直在你身边～",
 ]
 
 FEED_QUOTES = [
     "好吃～",
     "谢谢款待！",
     "再来一点？",
-    "唔～是本总监最喜欢的味道！",
-    "幸福感拉满啦～",
+    "一口小点心，充满干劲啦～",
 ]
 
 HUNGRY_QUOTES = [
-    "肚子咕噜噜叫了……有小点心吗？",
-    "有点饿了呢，投喂一块金珀蛋挞吧～",
+    "肚子咕噜噜叫了……想吃小饼干或三文鱼～",
 ]
 
 THIRSTY_QUOTES = [
-    "嗓子有点干，想喝星光蜜桃茶～",
-    "喝点水才能顺畅消化哦～",
-]
-
-BORED_QUOTES = [
-    "好安静呀……陪我摇把骰子玩玩吧？",
-    "尾巴都快闲得打结啦～",
-]
-
-DIGEST_QUOTES = [
-    "唔……肚子里的食物快消化完了，咕噜噜……",
+    "有点渴了呢，想喝杯热可可或吃个甜桃子～",
 ]
 
 POOP_QUOTES = [
-    "噗——排出来舒服多啦，帮我清一下小便便吧～",
+    "噗——消化完排出来啦，点一下便便就能清理掉哦～",
 ]
 
 
 @dataclass
-class FoodItem:
+class SnackItem:
     key: str
     name: str
     hunger_gain: float
     thirst_gain: float
     gut_gain: float
-    color_main: QColor
-    color_sub: QColor
 
 
-FOOD_MENU_ITEMS = [
-    FoodItem("tart", "金珀蛋挞", 26.0, 2.0, 34.0, QColor(242, 202, 120), QColor(214, 146, 76)),
-    FoodItem("cake", "薄荷奶油糕", 28.0, 5.0, 36.0, QColor(138, 212, 198), QColor(252, 246, 236)),
-    FoodItem("tea", "星光蜜桃茶", 8.0, 32.0, 10.0, QColor(232, 168, 186), QColor(250, 232, 238)),
-    FoodItem("pudding", "焦糖猫爪冻", 22.0, 12.0, 28.0, QColor(238, 190, 132), QColor(186, 132, 218)),
+SNACK_ITEMS = [
+    SnackItem("cookie", "小饼干", 25.0, -2.0, 32.0),
+    SnackItem("salmon", "三文鱼", 30.0, 5.0, 36.0),
+    SnackItem("peach",  "甜桃子", 16.0, 22.0, 22.0),
+    SnackItem("cocoa",  "热可可", 10.0, 32.0, 14.0),
 ]
 
 
 # ==============================================================================
-# 白圆角胶囊长条输入框（文件拖放后缀重命名，带安全防冲突检查）
+# 「把文件交给我」重命名弹窗（1:1 还原参考图右上角卡片 + 极简原文件名后直接追加）
 # ==============================================================================
-class WhiteCapsuleRenameBar(QWidget):
-    """白圆角胶囊长条输入框：支持批量拖放、非法字符过滤、同名冲突保护"""
+class RenameCardDialog(QDialog):
+    """
+    参考图右上角「把文件交给我」卡片：
+    - 简单直接：在原文件名（不含扩展名）后面直接追加用户输入的内容！
+      例如 000.jpg：输入 (555) -> 000(555).jpg；输入 _555 -> 000_555.jpg；输入 555 -> 000555.jpg
+    """
 
     ILLEGAL_CHARS = re.compile(r'[\\/:*?"<>|]')
 
-    def __init__(self, parent_pet: "ShajinFoxPet"):
+    def __init__(self, file_paths: list[Path], parent_pet: "ShajinFoxPet"):
         super().__init__(parent_pet)
         self.pet = parent_pet
-        self.file_paths: list[Path] = []
-        self.hide()
+        self.file_paths = file_paths
+        self.renamed_count = 0
+
+        self.setWindowTitle("把文件交给我")
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedWidth(410)
+        self._drag_pos: Optional[QPoint] = None
         self._init_ui()
 
     def _init_ui(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(9, 5, 8, 5)
-        layout.setSpacing(6)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
 
-        self.file_tag = QLabel("000.jpg")
-        self.file_tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.file_tag)
-
-        self.input_edit = QLineEdit()
-        self.input_edit.setPlaceholderText("输入后缀如 555 回车 -> 000(555).jpg")
-        self.input_edit.returnPressed.connect(self.confirm_rename)
-        layout.addWidget(self.input_edit, 1)
-
-        self.btn_ok = QPushButton("确认")
-        self.btn_ok.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.btn_ok.clicked.connect(self.confirm_rename)
-        layout.addWidget(self.btn_ok)
-
-        self.btn_close = QPushButton("×")
-        self.btn_close.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.btn_close.clicked.connect(self.close_bar)
-        layout.addWidget(self.btn_close)
-
-        self.setStyleSheet(
+        card = QFrame(self)
+        card.setObjectName("MainCard")
+        card.setStyleSheet(
             """
+            QFrame#MainCard {
+                background-color: #F5F6F3;
+                border: 1.5px solid #E2E4DE;
+                border-radius: 22px;
+            }
             QLabel {
-                background-color: #DAF2EC;
-                color: #523A42;
-                border: 1px solid #7CC6B8;
-                border-radius: 11px;
-                padding: 2px 9px;
+                color: #3A4440;
                 font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-                font-size: 11px;
-                font-weight: bold;
+                background: transparent;
             }
             QLineEdit {
-                background: transparent;
+                background-color: #FFFFFF;
+                border: 1.5px solid #D5D3C8;
+                border-radius: 12px;
+                padding: 8px 12px;
+                color: #3B4D46;
+                font-family: "Microsoft YaHei", sans-serif;
+                font-size: 13px;
+                font-weight: bold;
+                selection-background-color: #CBE0D6;
+            }
+            QLineEdit:focus {
+                border-color: #9EC5B5;
+            }
+            QFrame#PreviewTable {
+                background-color: #FAFBF8;
+                border: 1px solid #E6E8E2;
+                border-radius: 14px;
+            }
+            QPushButton#BtnClose {
+                background-color: #EAECE7;
+                color: #5C6B64;
                 border: none;
-                color: #523A42;
-                font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+                border-radius: 13px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton#BtnClose:hover {
+                background-color: #DCE0D8;
+            }
+            QPushButton#BtnCancel {
+                background-color: #F7F8F5;
+                color: #5C6B64;
+                border: 1px solid #DFR2DC;
+                border: 1px solid #DFE2DC;
+                border-radius: 16px;
+                padding: 7px 18px;
+                font-family: "Microsoft YaHei", sans-serif;
                 font-size: 12px;
                 font-weight: bold;
-                selection-background-color: #B28ED0;
             }
-            QPushButton {
-                background-color: #B28ED0;
-                color: #FFFFFF;
+            QPushButton#BtnCancel:hover {
+                background-color: #ECEEE9;
+            }
+            QPushButton#BtnConfirm {
+                background-color: #CBE0D6;
+                color: #3B4D46;
                 border: none;
-                border-radius: 11px;
-                padding: 3px 10px;
+                border-radius: 16px;
+                padding: 7px 20px;
                 font-family: "Microsoft YaHei", sans-serif;
-                font-size: 11px;
+                font-size: 12px;
                 font-weight: bold;
             }
-            QPushButton:hover {
-                background-color: #9E78BF;
-            }
-            """
-        )
-        self.btn_close.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #F3ECE2;
-                color: #523A42;
-                border-radius: 10px;
-                padding: 1px 6px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #E6DBD0;
+            QPushButton#BtnConfirm:hover {
+                background-color: #B8D4C7;
             }
             """
         )
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        rect = QRectF(2, 2, self.width() - 4, self.height() - 4)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(Theme.SHADOW_SOFT)
-        painter.drawRoundedRect(rect.translated(0, 2), 18, 18)
+        vbox = QVBoxLayout(card)
+        vbox.setContentsMargins(20, 18, 20, 18)
+        vbox.setSpacing(10)
 
-        painter.setBrush(QColor(255, 255, 255, 248))
-        painter.setPen(QPen(Theme.MINT_BORDER, 1.8))
-        painter.drawRoundedRect(rect, 18, 18)
+        # 顶部标题行 + 右上角圆形关闭按钮
+        top_row = QHBoxLayout()
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+        lbl_title = QLabel("把文件交给我")
+        lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #3A4440;")
+        lbl_sub = QLabel(f"已接收 {len(self.file_paths)} 个文件 · 在原文件名后直接追加内容")
+        lbl_sub.setStyleSheet("font-size: 11px; color: #848E88;")
+        title_box.addWidget(lbl_title)
+        title_box.addWidget(lbl_sub)
+        top_row.addLayout(title_box)
+        top_row.addStretch()
 
-    def open_for_files(self, paths: list[Path]):
-        self.file_paths = paths
-        first_name = paths[0].name
-        if len(first_name) > 13:
-            first_name = first_name[:10] + "…"
-        self.file_tag.setText(f"{first_name} 等{len(paths)}项" if len(paths) > 1 else first_name)
-        self.input_edit.clear()
-        self.show()
-        self.raise_()
-        self.input_edit.setFocus()
-        self.pet.update_window_mask()
+        btn_close = QPushButton("×")
+        btn_close.setObjectName("BtnClose")
+        btn_close.setFixedSize(26, 26)
+        btn_close.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_close.clicked.connect(self.reject)
+        top_row.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignTop)
+        vbox.addLayout(top_row)
 
-    def close_bar(self):
-        self.hide()
-        self.pet.update_window_mask()
-        self.pet.update()
+        # 输入框（直接追加到原词后面）
+        self.input_edit = QLineEdit()
+        self.input_edit.setPlaceholderText("输入要加在原名后的内容，如 (555) 或 _555")
+        self.input_edit.textChanged.connect(self._update_preview_rows)
+        self.input_edit.returnPressed.connect(self._do_confirm)
+        vbox.addWidget(self.input_edit)
+
+        # 实时预览双列表格（原文件名 | 改名后）
+        table_frame = QFrame()
+        table_frame.setObjectName("PreviewTable")
+        t_layout = QVBoxLayout(table_frame)
+        t_layout.setContentsMargins(12, 10, 12, 10)
+        t_layout.setSpacing(6)
+
+        hdr_row = QHBoxLayout()
+        h1 = QLabel("原文件名")
+        h1.setStyleSheet("font-size: 11px; color: #848E88; font-weight: bold;")
+        h2 = QLabel("改名后")
+        h2.setStyleSheet("font-size: 11px; color: #848E88; font-weight: bold;")
+        hdr_row.addWidget(h1, 1)
+        hdr_row.addWidget(h2, 1)
+        t_layout.addLayout(hdr_row)
+
+        self.preview_rows: list[tuple[QLabel, QLabel]] = []
+        for p in self.file_paths[:4]:
+            r_layout = QHBoxLayout()
+            lbl_orig = QLabel(p.name)
+            lbl_orig.setStyleSheet("font-size: 12px; color: #5C6B64;")
+            lbl_new = QLabel(p.name)
+            lbl_new.setStyleSheet("font-size: 12px; color: #3B4D46; font-weight: bold;")
+            r_layout.addWidget(lbl_orig, 1)
+            r_layout.addWidget(lbl_new, 1)
+            t_layout.addLayout(r_layout)
+            self.preview_rows.append((lbl_orig, lbl_new))
+
+        if len(self.file_paths) > 4:
+            more_lbl = QLabel(f"… 以及其余 {len(self.file_paths) - 4} 个文件")
+            more_lbl.setStyleSheet("font-size: 11px; color: #848E88;")
+            t_layout.addWidget(more_lbl)
+
+        vbox.addWidget(table_frame)
+
+        # 底部胶囊按钮行：「再想一下」 | 「确认改名」
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_cancel = QPushButton("再想一下")
+        btn_cancel.setObjectName("BtnCancel")
+        btn_cancel.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_ok = QPushButton("确认改名")
+        btn_ok.setObjectName("BtnConfirm")
+        btn_ok.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_ok.clicked.connect(self._do_confirm)
+
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_ok)
+        vbox.addLayout(btn_row)
+
+        root.addWidget(card)
+        self._update_preview_rows()
 
     @staticmethod
-    def format_new_filename(orig_path: Path, raw_suffix: str) -> str:
-        s = raw_suffix.strip()
-        if not s:
+    def build_new_name(orig_path: Path, suffix_str: str) -> str:
+        """极简直接追加：在原文件名（stem）后直接加上输入的内容，再拼回扩展名（suffix）"""
+        if not suffix_str:
             return orig_path.name
-        stem = orig_path.stem
-        ext = orig_path.suffix
-        inner = s
-        while inner and inner[0] in ("（", "("):
-            inner = inner[1:].strip()
-        while inner and inner[-1] in ("）", ")"):
-            inner = inner[:-1].strip()
-        if not inner:
-            return orig_path.name
-        return f"{stem}({inner}){ext}"
+        return f"{orig_path.stem}{suffix_str}{orig_path.suffix}"
 
-    def confirm_rename(self):
-        raw = self.input_edit.text().strip()
+    def _update_preview_rows(self):
+        raw = self.input_edit.text()
+        preview_suffix = raw if raw else "(555)"
+        for p, (_, lbl_new) in zip(self.file_paths[:4], self.preview_rows):
+            lbl_new.setText(self.build_new_name(p, preview_suffix))
+
+    def _do_confirm(self):
+        raw = self.input_edit.text()
         if not raw:
-            self.pet.show_speech("请输入要添加的后缀内容哦～", force=True)
+            self.pet.show_speech("还没有输入要追加的内容哦～", force=True)
             self.input_edit.setFocus()
             return
-
         if self.ILLEGAL_CHARS.search(raw):
-            self.pet.show_speech("后缀不能包含 \\ / : * ? \" < > | 等非法字符哦～", force=True)
+            self.pet.show_speech("文件名不能包含 \\ / : * ? \" < > | 字符哦～", force=True)
             return
 
-        success_names = []
-        skipped_conflicts = []
-        failed_reasons = []
+        success_list = []
+        conflict_list = []
+        error_list = []
 
         for p in self.file_paths:
             if not p.exists():
-                failed_reasons.append(f"{p.name} 不存在")
+                error_list.append(p.name)
                 continue
-            new_name = self.format_new_filename(p, raw)
+            new_name = self.build_new_name(p, raw)
             target = p.with_name(new_name)
             if target == p:
                 continue
-            # 严禁无提示覆盖已存在的同名文件
             if target.exists():
-                skipped_conflicts.append(target.name)
+                conflict_list.append(target.name)
                 continue
             try:
                 p.rename(target)
-                success_names.append(target.name)
-            except Exception as exc:
-                failed_reasons.append(f"{p.name} ({exc})")
+                success_list.append(target.name)
+            except Exception:
+                error_list.append(p.name)
 
-        self.close_bar()
+        self.renamed_count = len(success_list)
+        self.accept()
 
-        if success_names:
+        if success_list:
             self.pet.trigger_click_bounce()
             self.pet.spawn_gentle_particles(count=4, kind="star")
-            if len(success_names) == 1 and not skipped_conflicts and not failed_reasons:
-                self.pet.show_speech(f"改好啦～已变成「{success_names[0]}」", force=True)
+            if len(success_list) == 1 and not conflict_list:
+                self.pet.show_speech(f"改好啦～已变成 {success_list[0]}", force=True)
             else:
-                msg = f"成功改名 {len(success_names)} 个文件！"
-                if skipped_conflicts:
-                    msg += f"（跳过同名冲突 {len(skipped_conflicts)} 个）"
+                msg = f"已更新 {len(success_list)} 个文件名！"
+                if conflict_list:
+                    msg += f"（跳过同名文件 {len(conflict_list)} 个）"
                 self.pet.show_speech(msg, force=True)
-        else:
-            if skipped_conflicts:
-                self.pet.show_speech(f"目标文件「{skipped_conflicts[0]}」已存在，未覆盖原文件～", force=True)
-            elif failed_reasons:
-                self.pet.show_speech(f"改名未成功：{failed_reasons[0]}", force=True)
+        elif conflict_list:
+            self.pet.show_speech(f"「{conflict_list[0]}」已存在，未覆盖原文件～", force=True)
+        elif error_list:
+            self.pet.show_speech(f"部分文件重命名未成功～", force=True)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos is not None and (event.buttons() & Qt.MouseButton.LeftButton):
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
 
 
 # ==============================================================================
-# 砂金小狐狸主窗口 (ShajinFoxPet)
+# 砂金小狐狸主窗口 (ShajinFoxPet v4.0)
 # ==============================================================================
 class ShajinFoxPet(QWidget):
-    """精致灵动的 Windows 砂金小狐狸桌面宠物"""
+    """住在桌面上的小狐狸 v4.0"""
 
-    CANVAS_W = 380
-    CANVAS_H = 440
+    # 基础画布尺寸更紧凑精致，支持 25% ~ 160% 滑块无级缩放
+    BASE_CANVAS_W = 310
+    BASE_CANVAS_H = 340
+    BASE_FOX_W    = 168.0
+    BASE_FOX_H    = 196.0
 
     def __init__(self):
         super().__init__()
 
-        # 1. 可持久化配置与生理状态
-        self.scale_factor = 1.0
-        self.hunger = 84.0              # 饱食度 (0~100)
-        self.thirst = 86.0              # 水分值 (0~100)
-        self.fun = 85.0                 # 心情值 (0~100)
-        self.food_in_gut = 20.0         # 肠胃待消化食物量
-        self.digestion_progress = 25.0  # 便意进度 (0~100%，满100%排便)
+        # 1. 状态与设置（默认 scale=0.85 更小巧精致，最小支持 0.25 即约 42px 迷你尺寸！）
+        self.scale_factor = 0.85
+        self.hunger = 85.0
+        self.thirst = 86.0
+        self.fun = 88.0
+        self.food_in_gut = 20.0
+        self.digestion_progress = 25.0
         self.warned_near_poop = False
         self.poops: list[dict] = []
 
-        self.auto_tuck_enabled = True   # 是否开启底部自动探头收纳
-        self.pin_expanded = False       # 是否固定展开（不自动沉回底部）
-        self.hide_all_text = False      # 是否隐藏所有文字与胶囊
+        self.auto_tuck_enabled = True
+        self.pin_expanded = False
+        self.hide_all_text = False
 
         self.load_state()
 
@@ -473,82 +527,73 @@ class ShajinFoxPet(QWidget):
         self.elapsed_time = 0.0
         self.anim_state = AnimPriorityState.IDLE
 
-        # 待机程序化微动画（呼吸 + 随机歪头/轻弹）
         self.breath_phase = random.uniform(0, 6.28)
-        self.idle_quirk_timer = random.uniform(4.5, 9.0)
-        self.idle_quirk_type = ""       # "tilt" | "stretch" | "hop"
+        self.idle_quirk_timer = random.uniform(5.0, 10.0)
+        self.idle_quirk_type = ""
         self.idle_quirk_t = 0.0
         self.idle_quirk_dur = 0.85
         self.idle_tilt_dir = 1.0
 
-        # 鼠标悬停缓动状态
         self.is_mouse_inside = False
-        self.hover_progress = 0.0       # 0.0 -> 1.0 (200ms 缓动)
+        self.hover_progress = 0.0
         self.hovered_btn_id = ""
-        self.btn_hover_prog: dict[str, float] = {}
+        self.hovered_snack_idx = -1
 
-        # 单击压缩回弹状态
         self.click_anim_t = 0.0
         self.click_anim_active = False
 
-        # 拖拽平滑跟随与方向倾斜
         self.dragging = False
         self.drag_offset = QPoint()
         self.mouse_down_global = QPoint()
         self.last_drag_global = QPoint()
-        self.drag_tilt_deg = 0.0        # 根据拖动水平速度产生的平滑倾斜角
-        self.near_bottom_magnet = False # 拖动接近底部 30~50px 时的磁吸微反馈
+        self.drag_tilt_deg = 0.0
+        self.near_bottom_magnet = False
 
-        # 环绕式精致圆形菜单 & 弹出式小型食物菜单
-        self.menu_visible_prog = 0.0    # 0.0 ~ 1.0 (淡入、缩放、轻微位移)
-        self.menu_hide_countdown = 0.0
-        self.food_menu_open = False
-        self.food_menu_prog = 0.0       # 0.0 ~ 1.0
+        # 底部横向胶囊工具栏 & 弹出面板状态
+        self.toolbar_prog = 0.0          # 0.0 ~ 1.0
+        self.toolbar_hide_countdown = 0.0
+        self.food_card_open = False      # 「今天想吃点什么？」1×4 卡片
+        self.food_card_prog = 0.0
+        self.size_card_open = False      # 大小滑块调节卡片
+        self.size_card_prog = 0.0
+        self.dragging_slider = False     # 是否正在拖动大小滑块
 
-        # 6 阶段顺序喂食动画状态
+        # 6 阶段顺序贝塞尔喂食动画
         self.feeding_active = False
-        self.feeding_food: Optional[FoodItem] = None
+        self.feeding_snack: Optional[SnackItem] = None
         self.feeding_elapsed = 0.0
-        self.feeding_start_pt = QPointF(190, 210)
-        self.feeding_mouth_pt = QPointF(172, 186)
+        self.feeding_start_pt = QPointF(155, 160)
+        self.feeding_mouth_pt = QPointF(140, 130)
         self.feeding_sparkles_spawned = False
-        self.feeding_bounce_done = False
 
-        # 屏幕底部自动吸附与探头收纳状态机
+        # 屏幕底部探头收纳状态机
         self.dock_state = DockState.FREE
         self.dock_anim_t = 0.0
-        self.dock_sink_progress = 0.0   # 0.0=完全展开, 1.0=完全收纳(仅露耳朵与半颗头)
+        self.dock_sink_progress = 0.0
         self.dock_sink_from = 0.0
         self.dock_sink_to = 0.0
         self.dock_pause_timer = 0.0
-        self.dock_untuck_Countdown = 0.0
-        self.dock_screen_bottom = 0
+        self.dock_untuck_countdown = 0.0
 
-        # 气泡淡入/微缩放/上浮/淡出状态
-        self.bubble_text = "喵呜～我是你的桌面小狐狸砂金，拖到屏幕底边会偷偷藏起来哦～"
-        self.bubble_hold_timer = 4.2
+        # 对话气泡与粒子
+        self.bubble_text = "摸摸它，陪你工作～"
+        self.bubble_hold_timer = 3.5
         self.bubble_alpha_prog = 1.0
-
-        # 柔和低饱和粒子系统
         self.particles: list[dict] = []
         self.drag_hover_file = False
 
-        # 加载透明背景砂金小狐狸 PNG
         sprite_file = resource_path("assets/pet_sprite.png")
         self.pet_pixmap = QPixmap(str(sprite_file))
 
         self._init_window()
-        self.rename_bar = WhiteCapsuleRenameBar(self)
-        self._layout_rename_bar()
         self._init_tray()
         self._init_timers()
-        self.update_window_mask()
 
     # ==========================================================================
-    # 初始化与窗口管理
+    # 窗口与托盘初始化
     # ==========================================================================
     def _init_window(self):
-        self.setWindowTitle("砂金小狐狸桌宠 (shajincw)")
+        self.setWindowTitle("住在桌面上的小狐狸 (shajincw)")
         flags = (
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -558,7 +603,7 @@ class ShajinFoxPet(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
-        self._apply_scale_size()
+        self._apply_window_size()
 
         icon_path = resource_path("assets/pet_icon.ico")
         if icon_path.exists():
@@ -567,28 +612,23 @@ class ShajinFoxPet(QWidget):
         screen = QGuiApplication.primaryScreen()
         if screen:
             avail = screen.availableGeometry()
-            self.move(avail.right() - self.width() - 48, avail.bottom() - self.height() - 18)
+            self.move(avail.right() - self.width() - 48, avail.bottom() - self.height() - 20)
 
-    def _apply_scale_size(self):
-        w = int(self.CANVAS_W * self.scale_factor)
-        h = int(self.CANVAS_H * self.scale_factor)
+    def _ui_scale(self) -> float:
+        """UI 面板缩放系数：当狐狸缩得很小（如 25%）时，工具栏和文字保持至少 0.72 倍可读尺寸"""
+        return max(0.72, min(1.25, self.scale_factor))
+
+    def _apply_window_size(self):
+        us = max(self.scale_factor, 0.72)
+        w = max(230, int(self.BASE_CANVAS_W * us))
+        h = max(250, int(self.BASE_CANVAS_H * us))
         self.setFixedSize(w, h)
-        if hasattr(self, "rename_bar"):
-            self._layout_rename_bar()
-
-    def _layout_rename_bar(self):
-        s = self.scale_factor
-        bw = min(self.width() - 12, max(285, int(348 * s)))
-        bh = 40
-        bx = (self.width() - bw) // 2
-        by = int(self.height() - 62 * s)
-        self.rename_bar.setGeometry(bx, by, bw, bh)
 
     def _init_tray(self):
         icon_path = resource_path("assets/pet_icon.ico")
         tray_icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon(self.pet_pixmap)
         self.tray = QSystemTrayIcon(tray_icon, self)
-        self.tray.setToolTip("砂金小狐狸桌宠 (shajincw)")
+        self.tray.setToolTip("住在桌面上的小狐狸 (shajincw)")
         self.tray.setContextMenu(self._build_context_menu())
         self.tray.activated.connect(self._on_tray_activated)
         self.tray.show()
@@ -613,10 +653,10 @@ class ShajinFoxPet(QWidget):
         try:
             if STATE_FILE.exists():
                 data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-                self.scale_factor = max(0.65, min(1.55, float(data.get("scale_factor", 1.0))))
-                self.hunger = float(data.get("hunger", 84.0))
+                self.scale_factor = max(0.25, min(1.60, float(data.get("scale_factor", 0.85))))
+                self.hunger = float(data.get("hunger", 85.0))
                 self.thirst = float(data.get("thirst", 86.0))
-                self.fun = float(data.get("fun", 85.0))
+                self.fun = float(data.get("fun", 88.0))
                 self.food_in_gut = float(data.get("food_in_gut", 20.0))
                 self.digestion_progress = float(data.get("digestion_progress", 25.0))
                 self.poops = data.get("poops", [])[:3]
@@ -645,59 +685,111 @@ class ShajinFoxPet(QWidget):
             pass
 
     # ==========================================================================
-    # 多显示器与任务栏工作区感知 + 窗口精确裁剪掩码 (防止透明大窗口遮挡桌面)
+    # 核心坐标与布局（1:1 复刻参考图）
     # ==========================================================================
     def _current_screen_geometry(self) -> QRect:
-        """获取狐狸当前所在显示器的工作区（自动避开 Windows 任务栏，支持多屏与高 DPI）"""
         center_global = self.geometry().center()
         screen: Optional[QScreen] = QGuiApplication.screenAt(center_global)
         if screen is None:
             screen = QGuiApplication.primaryScreen()
-        if screen is not None:
-            return screen.availableGeometry()
-        return QRect(0, 0, 1920, 1040)
+        return screen.availableGeometry() if screen else QRect(0, 0, 1920, 1040)
 
     def _fox_anchor(self) -> tuple[float, float, float, float]:
         """
-        返回狐狸绘制中心 (cx, cy) 与绘制宽高 (fw, fh)。
-        探头收纳时：保持狐狸原有大小 fw, fh 完全不变，通过向下增加 sink_y 实现真实下沉裁剪！
+        返回狐狸中心 (cx, cy) 与宽高 (fw, fh)。
+        - 支持 25% ~ 160% 无级缩放（25% 时仅 42×49px 迷你尺寸）；
+        - 收纳时保持狐狸当前大小不变，通过向下位移沉入窗口底边外，仅露耳朵与紫眼睛上半张脸。
         """
         s = self.scale_factor
-        fw = 236.0 * s
-        fh = 276.0 * s
+        us = self._ui_scale()
+        fw = self.BASE_FOX_W * s
+        fh = self.BASE_FOX_H * s
         cx = self.width() * 0.5
-        base_cy = self.height() - (fh * 0.5) - 34.0 * s
-        # 当处于底部收纳时，向下位移使下半身移出窗口底边之外，仅留耳朵与上半颗脑袋在窗口底部内
-        max_sink_px = fh * AnimConfig.TUCK_SINK_RATIO + 34.0 * s
-        sink_offset_y = self.dock_sink_progress * max_sink_px
-        cy = base_cy + sink_offset_y
+        toolbar_reserve = 46.0 * us
+        base_cy = self.height() - toolbar_reserve - (fh * 0.5)
+        # 收纳到底部时，狐狸下沉使得窗口底边刚好切在紫眼睛下方（露出顶部 38% 的高度）
+        sink_target_cy = self.height() + (fh * 0.5) - (fh * (1.0 - AnimConfig.TUCK_SINK_RATIO))
+        cy = base_cy + self.dock_sink_progress * (sink_target_cy - base_cy)
         return cx, cy, fw, fh
 
-    def update_window_mask(self):
-        """
-        Windows 下 WA_TranslucentBackground 原生支持 alpha=0 像素穿透点击且具备平滑抗锯齿边缘；
-        不再使用 1-bit QBitmap 裁剪掩码，避免 Windows 窗口边缘产生锯齿亮边。
-        """
-        return
+    def _get_pill_toolbar_rect(self) -> QRectF:
+        """参考图左上角：狐狸正下方居中的全圆角横向胶囊工具栏"""
+        us = self._ui_scale()
+        tw = 152.0 * us
+        th = 34.0 * us
+        tx = (self.width() - tw) * 0.5
+        ty = self.height() - th - 6.0 * us
+        return QRectF(tx, ty, tw, th)
+
+    def _get_pill_toolbar_buttons(self) -> dict[str, QRectF]:
+        """胶囊工具栏内的 4 个线性图标按钮：feed(🍴)、rename(Aa)、tuck(⊻)、more(···)"""
+        bar = self._get_pill_toolbar_rect()
+        keys = ["feed", "rename", "tuck", "more"]
+        cell_w = bar.width() / len(keys)
+        rects: dict[str, QRectF] = {}
+        for i, k in enumerate(keys):
+            rects[k] = QRectF(bar.left() + i * cell_w, bar.top(), cell_w, bar.height())
+        return rects
+
+    def _get_snack_card_rect(self) -> QRectF:
+        """参考图右下角：「今天想吃点什么？」1×4 单行横向点心卡片"""
+        us = self._ui_scale()
+        cw = min(self.width() - 12.0, 236.0 * us)
+        ch = 96.0 * us
+        bar = self._get_pill_toolbar_rect()
+        cx = (self.width() - cw) * 0.5
+        cy = max(8.0, bar.top() - ch - 8.0 * us)
+        return QRectF(cx, cy, cw, ch)
+
+    def _get_snack_tile_rects(self) -> list[tuple[SnackItem, QRectF, QRectF]]:
+        """返回 4 个点心的 (SnackItem, 圆角方形图标底板QRectF, 整体点击区QRectF)"""
+        card = self._get_snack_card_rect()
+        us = self._ui_scale()
+        pad_x = 10.0 * us
+        top_y = card.top() + 28.0 * us
+        col_w = (card.width() - pad_x * 2) / 4.0
+        tile_sz = min(40.0 * us, col_w - 6.0 * us)
+        out = []
+        for i, item in enumerate(SNACK_ITEMS):
+            col_x = card.left() + pad_x + i * col_w
+            tile_x = col_x + (col_w - tile_sz) * 0.5
+            tile_r = QRectF(tile_x, top_y, tile_sz, tile_sz)
+            hit_r = QRectF(col_x, top_y - 2 * us, col_w, card.height() - 28.0 * us)
+            out.append((item, tile_r, hit_r))
+        return out
+
+    def _get_size_slider_card_rect(self) -> QRectF:
+        """点击工具栏 ··· 弹出的「体型大小滑块 + 状态」轻拟物卡片"""
+        us = self._ui_scale()
+        cw = min(self.width() - 16.0, 216.0 * us)
+        ch = 72.0 * us
+        bar = self._get_pill_toolbar_rect()
+        cx = (self.width() - cw) * 0.5
+        cy = max(8.0, bar.top() - ch - 8.0 * us)
+        return QRectF(cx, cy, cw, ch)
+
+    def _get_slider_track_rect(self) -> QRectF:
+        card = self._get_size_slider_card_rect()
+        us = self._ui_scale()
+        return QRectF(card.left() + 16 * us, card.top() + 34 * us, card.width() - 32 * us, 14 * us)
 
     # ==========================================================================
-    # 屏幕底部自动吸附与两段式探头收纳系统（核心需求四）
+    # 屏幕底部自动吸附与两段式探头收纳（核心需求）
     # ==========================================================================
     def _distance_to_screen_bottom(self) -> int:
         avail = self._current_screen_geometry()
-        fox_bottom_global = self.y() + self.height()
-        return avail.bottom() - fox_bottom_global
+        return avail.bottom() - (self.y() + self.height())
 
     def _align_window_to_screen_bottom(self):
         avail = self._current_screen_geometry()
-        target_x = max(avail.left() + 6, min(self.x(), avail.right() - self.width() - 6))
-        target_y = avail.bottom() - self.height() + 2
-        self.move(target_x, target_y)
+        tx = max(avail.left() + 4, min(self.x(), avail.right() - self.width() - 4))
+        ty = avail.bottom() - self.height() + 1
+        self.move(tx, ty)
 
     def _start_sink_to_bottom(self):
-        """松开鼠标或移开延迟到达后：平滑沉入屏幕底部进入探头收纳状态"""
         self._align_window_to_screen_bottom()
-        self.food_menu_open = False
+        self.food_card_open = False
+        self.size_card_open = False
         self.dock_state = DockState.SINKING
         self.dock_anim_t = 0.0
         self.dock_sink_from = self.dock_sink_progress
@@ -705,16 +797,9 @@ class ShajinFoxPet(QWidget):
         self.frame_timer.setInterval(AnimConfig.DT_ACTIVE_MS)
 
     def _start_peek_sequence(self):
-        """
-        鼠标移到露出的半颗脑袋上：
-        先向上探出一点 (PEEK_STAGE1_RATIO) -> 短暂停顿 (140ms) -> 再完整探出身体 (0.0)
-        支持随时中断正在下沉的动画！
-        """
         if self.dock_state == DockState.SINKING and self.dock_sink_progress < 0.55:
-            # 还没沉到底就重新靠近：直接平滑展开到完整身体
             self._start_expand_full()
             return
-
         self.dock_state = DockState.PEEKING_STEP1
         self.dock_anim_t = 0.0
         self.dock_sink_from = self.dock_sink_progress
@@ -737,17 +822,14 @@ class ShajinFoxPet(QWidget):
             self.dock_anim_t += dt / AnimConfig.TUCK_DURATION
             k = ease_in_out_cubic(self.dock_anim_t)
             self.dock_sink_progress = self.dock_sink_from + (self.dock_sink_to - self.dock_sink_from) * k
-            self.update_window_mask()
             if self.dock_anim_t >= 1.0:
                 self.dock_sink_progress = 1.0
                 self.dock_state = DockState.TUCKED
-                self.update_window_mask()
 
         elif self.dock_state == DockState.PEEKING_STEP1:
             self.dock_anim_t += dt / AnimConfig.PEEK_STAGE1_DUR
             k = ease_out_cubic(self.dock_anim_t)
             self.dock_sink_progress = self.dock_sink_from + (self.dock_sink_to - self.dock_sink_from) * k
-            self.update_window_mask()
             if self.dock_anim_t >= 1.0:
                 self.dock_sink_progress = AnimConfig.PEEK_STAGE1_RATIO
                 self.dock_state = DockState.PEEKING_PAUSE
@@ -760,168 +842,136 @@ class ShajinFoxPet(QWidget):
 
         elif self.dock_state == DockState.EXPANDING:
             self.dock_anim_t += dt / AnimConfig.EXPAND_DURATION
-            k = ease_out_back(self.dock_anim_t, overshoot=1.12)
+            k = ease_out_back(self.dock_anim_t, overshoot=1.10)
             self.dock_sink_progress = max(0.0, self.dock_sink_from + (self.dock_sink_to - self.dock_sink_from) * k)
-            self.update_window_mask()
             if self.dock_anim_t >= 1.0:
                 self.dock_sink_progress = 0.0
                 self.dock_state = DockState.EXPANDED_HOLD
-                self.dock_untuck_Countdown = AnimConfig.UNTUCK_HIDE_WAIT
-                self.update_window_mask()
+                self.dock_untuck_countdown = AnimConfig.UNTUCK_HIDE_WAIT
 
         elif self.dock_state == DockState.EXPANDED_HOLD:
-            # 鼠标移开且未固定展开、未在喂食或打开菜单时，延迟 1.45s 沉回底部
             busy = (
                 self.is_mouse_inside
                 or self.pin_expanded
                 or not self.auto_tuck_enabled
                 or self.feeding_active
-                or self.food_menu_open
-                or self.rename_bar.isVisible()
+                or self.food_card_open
+                or self.size_card_open
             )
             if busy:
-                self.dock_untuck_Countdown = AnimConfig.UNTUCK_HIDE_WAIT
+                self.dock_untuck_countdown = AnimConfig.UNTUCK_HIDE_WAIT
             else:
-                self.dock_untuck_Countdown -= dt
-                if self.dock_untuck_Countdown <= 0.0:
+                self.dock_untuck_countdown -= dt
+                if self.dock_untuck_countdown <= 0.0:
                     self._start_sink_to_bottom()
 
     # ==========================================================================
-    # 喂食系统：小型食物菜单 + 6 阶段顺序贝塞尔曲线动画（核心需求三）
+    # 喂食、改名弹窗与滑块调大小
     # ==========================================================================
-    def toggle_food_menu(self):
-        self.food_menu_open = not self.food_menu_open
+    def toggle_food_card(self):
+        self.size_card_open = False
+        self.food_card_open = not self.food_card_open
         self.frame_timer.setInterval(AnimConfig.DT_ACTIVE_MS)
-        self.update_window_mask()
         self.update()
 
-    def start_feeding_sequence(self, food: FoodItem, click_pos: QPointF):
-        """
-        选择食物后触发严格的 6 阶段顺序喂食动画：
-        阶段 1 (0.00 ~ 0.18s)：食物从菜单位置轻轻浮起；
-        阶段 2 (0.18 ~ 0.62s)：沿柔和的贝塞尔曲线飞向狐狸嘴边；
-        阶段 3 (0.35 ~ 0.72s)：狐狸稍微前倾，模拟迎接食物；
-        阶段 4 (0.62 ~ 0.86s)：食物在嘴边逐渐缩小、淡出，模拟被吃掉；
-        阶段 5 (0.86 ~ 1.15s)：狐狸轻轻弹跳，出现少量低饱和金色星星或爱心；
-        阶段 6 (0.92s)：随机显示「好吃～」「谢谢款待！」「再来一点？」等小气泡。
-        """
-        self.food_menu_open = False
-        if self.hunger >= 99.0 and self.food_in_gut >= 88.0:
+    def toggle_size_card(self):
+        self.food_card_open = False
+        self.size_card_open = not self.size_card_open
+        self.frame_timer.setInterval(AnimConfig.DT_ACTIVE_MS)
+        self.update()
+
+    def start_feeding_snack(self, snack: SnackItem, start_pt: QPointF):
+        self.food_card_open = False
+        if self.hunger >= 99.0 and self.food_in_gut >= 88.0 and snack.hunger_gain > 15.0:
             self.trigger_click_bounce()
             self.show_speech("肚子已经圆滚滚啦，消化一会儿再吃吧～")
             return
 
         cx, cy, fw, fh = self._fox_anchor()
         self.feeding_active = True
-        self.feeding_food = food
+        self.feeding_snack = snack
         self.feeding_elapsed = 0.0
-        self.feeding_start_pt = QPointF(click_pos)
-        # 砂金小狐狸嘴部坐标（位于中心偏左上）
-        self.feeding_mouth_pt = QPointF(cx - fw * 0.05, cy - fh * 0.13)
+        self.feeding_start_pt = QPointF(start_pt)
+        self.feeding_mouth_pt = QPointF(cx - fw * 0.05, cy - fh * 0.12)
         self.feeding_sparkles_spawned = False
-        self.feeding_bounce_done = False
 
-        # 真实生理指标更新
-        self.hunger = min(100.0, self.hunger + food.hunger_gain)
-        self.thirst = min(100.0, self.thirst + food.thirst_gain)
-        self.food_in_gut = min(100.0, self.food_in_gut + food.gut_gain)
+        self.hunger = max(0.0, min(100.0, self.hunger + snack.hunger_gain))
+        self.thirst = max(0.0, min(100.0, self.thirst + snack.thirst_gain))
+        self.fun = min(100.0, self.fun + 10.0)
+        self.food_in_gut = min(100.0, self.food_in_gut + snack.gut_gain)
+        if snack.thirst_gain >= 20.0 and self.food_in_gut > 0:
+            boost = min(self.food_in_gut, 10.0)
+            self.food_in_gut -= boost
+            self.digestion_progress = min(100.0, self.digestion_progress + boost)
+            self._check_digestion_to_poop()
+
         self.save_state()
-        self.update_window_mask()
         self.frame_timer.setInterval(AnimConfig.DT_ACTIVE_MS)
 
     def _update_feeding_sequence(self, dt: float):
         if not self.feeding_active:
             return
         self.feeding_elapsed += dt
-        t = self.feeding_elapsed
-
-        # 阶段 5 & 6：0.86s 食物吃完瞬间，触发轻弹、柔和星心粒子与美食气泡
-        if t >= 0.86 and not self.feeding_sparkles_spawned:
+        if self.feeding_elapsed >= 0.86 and not self.feeding_sparkles_spawned:
             self.feeding_sparkles_spawned = True
             self.spawn_gentle_particles(count=4, kind="mixed", origin=self.feeding_mouth_pt)
             self.show_speech(random.choice(FEED_QUOTES))
-
-        if t >= 1.18:
+        if self.feeding_elapsed >= 1.18:
             self.feeding_active = False
-            self.feeding_food = None
-
-    # ==========================================================================
-    # 其他互动功能（喝水、玩玩具、消化排便、铲屎）
-    # ==========================================================================
-    def action_drink(self):
-        self.food_menu_open = False
-        tea = FOOD_MENU_ITEMS[2]  # 星光蜜桃茶
-        btn_rects = self._get_circular_button_rects()
-        start_pt = btn_rects["drink"].center() if "drink" in btn_rects else QPointF(self.width() * 0.3, self.height() * 0.5)
-        self.start_feeding_sequence(tea, start_pt)
-        # 喝水温和促进肠胃消化
-        if self.food_in_gut > 0:
-            step = min(self.food_in_gut, 12.0)
-            self.food_in_gut -= step
-            self.digestion_progress = min(100.0, self.digestion_progress + step * 1.1)
-            self._check_digestion_to_poop()
-
-    def action_play_toy(self):
-        self.food_menu_open = False
-        self.fun = min(100.0, self.fun + 26.0)
-        self.hunger = max(0.0, self.hunger - 3.0)
-        self.thirst = max(0.0, self.thirst - 3.0)
-        if self.food_in_gut > 0:
-            step = min(self.food_in_gut, 7.0)
-            self.food_in_gut -= step
-            self.digestion_progress = min(100.0, self.digestion_progress + step)
-
-        self.trigger_click_bounce()
-        self.spawn_gentle_particles(count=4, kind="star")
-        pts = random.randint(1, 6)
-        self.show_speech(random.choice([
-            f"叮～金色骰子转出了 {pts} 点，和朋友玩真开心！",
-            "喵呜～（扑向小筹码）心情变好啦！",
-            f"是 {pts} 点呢，今天好运站在我们这边～",
-        ]))
-        self._check_digestion_to_poop()
-        self.save_state()
+            self.feeding_snack = None
 
     def _check_digestion_to_poop(self):
-        if self.digestion_progress >= 82.0 and not self.warned_near_poop:
-            self.warned_near_poop = True
-            self.show_speech(random.choice(DIGEST_QUOTES))
         if self.digestion_progress >= 100.0:
             self.digestion_progress = 0.0
             self.warned_near_poop = False
-            self.spawn_poop()
+            if len(self.poops) < 3:
+                rx = random.choice([-68, -52, 52, 68])
+                ry = random.randint(62, 78)
+                self.poops.append({"rx": rx, "ry": ry})
+                self.trigger_click_bounce()
+                self.show_speech(random.choice(POOP_QUOTES))
+                self.save_state()
 
-    def spawn_poop(self):
-        if len(self.poops) >= 3:
-            return
-        rx = random.choice([-105, -82, 82, 105])
-        ry = random.randint(92, 112)
-        self.poops.append({"rx": rx, "ry": ry})
-        self.trigger_click_bounce()
-        self.show_speech(random.choice(POOP_QUOTES))
+    def set_pet_scale(self, new_scale: float, announce: bool = False):
+        old_bottom = self.y() + self.height()
+        old_cx = self.x() + self.width() // 2
+        self.scale_factor = max(0.25, min(1.60, round(new_scale, 2)))
+        self._apply_window_size()
+        self.move(old_cx - self.width() // 2, old_bottom - self.height())
+        if self.dock_state != DockState.FREE:
+            self._align_window_to_screen_bottom()
+        if announce:
+            self.show_speech(f"大小 {int(self.scale_factor * 100)}%")
         self.save_state()
-        self.update_window_mask()
+        self.update()
 
-    def action_clean_poop(self):
-        self.food_menu_open = False
-        if not self.poops:
-            self.show_speech("地板干干净净的，吃饱消化满 100% 才会拉便便哦～")
-            return
-        cx, cy, _, _ = self._fox_anchor()
-        for p in self.poops:
-            pt = QPointF(cx + p["rx"] * self.scale_factor, cy + p["ry"] * self.scale_factor)
-            self.spawn_gentle_particles(count=3, kind="star", origin=pt)
-        self.poops.clear()
-        self.fun = min(100.0, self.fun + 10.0)
-        self.trigger_click_bounce()
-        self.show_speech("打扫干净啦，空气都变得香香的～谢谢你！")
-        self.save_state()
-        self.update_window_mask()
+    def _set_scale_from_slider_x(self, mouse_x: float):
+        track = self._get_slider_track_rect()
+        ratio = max(0.0, min(1.0, (mouse_x - track.left()) / max(1.0, track.width())))
+        # 映射到 0.25 (25%) ~ 1.50 (150%)
+        new_scale = 0.25 + ratio * 1.25
+        self.set_pet_scale(new_scale, announce=False)
+
+    def open_rename_dialog(self, paths: Optional[list[Path]] = None):
+        self.food_card_open = False
+        self.size_card_open = False
+        if not paths:
+            files, _ = QFileDialog.getOpenFileNames(self, "把文件交给我 · 选择要改名的文件")
+            if not files:
+                return
+            paths = [Path(f) for f in files]
+
+        dlg = RenameCardDialog(paths, self)
+        avail = self._current_screen_geometry()
+        gx = min(avail.right() - dlg.width() - 16, max(avail.left() + 16, self.x() - 40))
+        gy = min(avail.bottom() - 280, max(avail.top() + 20, self.y() - 40))
+        dlg.move(gx, gy)
+        dlg.exec()
 
     # ==========================================================================
-    # 气泡与低饱和轻盈粒子系统
+    # 气泡与柔和粒子
     # ==========================================================================
-    def show_speech(self, text: str, duration: float = 3.6, force: bool = False):
+    def show_speech(self, text: str, duration: float = 3.2, force: bool = False):
         if self.hide_all_text and not force:
             return
         self.bubble_text = text
@@ -939,120 +989,36 @@ class ShajinFoxPet(QWidget):
     def spawn_gentle_particles(
         self, count: int = 3, kind: str = "mixed", origin: Optional[QPointF] = None
     ):
-        """生成 2~5 个细小、柔和、低饱和的小爱心、四角星或香槟金光点"""
         cx, cy, fw, fh = self._fox_anchor()
         base_pt = origin if origin is not None else QPointF(cx, cy - fh * 0.22)
-        s = self.scale_factor
-
+        s = self._ui_scale()
         palette = [
             Theme.CHAMPAGNE_GOLD,
-            Theme.ROSE_SOFT,
-            Theme.MINT_BORDER,
-            Theme.LAVENDER_MAIN,
+            QColor(234, 162, 174, 230),
+            QColor(156, 206, 190, 230),
         ]
-        for i in range(count):
+        for _ in range(count):
             angle = random.uniform(-math.pi * 0.85, -math.pi * 0.15)
-            speed = random.uniform(18.0, 34.0) * s
+            speed = random.uniform(16.0, 30.0) * s
             p_type = kind if kind != "mixed" else random.choice(["heart", "star", "dot"])
             self.particles.append({
                 "type": p_type,
-                "x": base_pt.x() + random.uniform(-24 * s, 24 * s),
-                "y": base_pt.y() + random.uniform(-12 * s, 12 * s),
+                "x": base_pt.x() + random.uniform(-18 * s, 18 * s),
+                "y": base_pt.y() + random.uniform(-10 * s, 10 * s),
                 "vx": math.cos(angle) * speed * 0.45,
                 "vy": -abs(math.sin(angle)) * speed,
-                "size": random.uniform(4.5, 7.2) * s,
+                "size": random.uniform(4.2, 6.5) * s,
                 "life": 0.0,
-                "max_life": random.uniform(0.65, 0.95),
+                "max_life": random.uniform(0.65, 0.90),
                 "color": random.choice(palette),
             })
         self.frame_timer.setInterval(AnimConfig.DT_ACTIVE_MS)
 
     # ==========================================================================
-    # 布局坐标与屏幕边缘自动避让（防越界）
-    # ==========================================================================
-    def _is_near_left_edge(self) -> bool:
-        avail = self._current_screen_geometry()
-        return (self.x() - avail.left()) < 90
-
-    def _is_near_right_edge(self) -> bool:
-        avail = self._current_screen_geometry()
-        return (avail.right() - (self.x() + self.width())) < 90
-
-    def _is_near_top_edge(self) -> bool:
-        avail = self._current_screen_geometry()
-        return (self.y() - avail.top()) < 75
-
-    def _get_circular_button_rects(self) -> dict[str, QRectF]:
-        """
-        在狐狸身侧弧形排列 5 个精致小圆形图标按钮：
-        feed(喂食)、drink(喝水)、play(玩耍)、clean(铲屎)、rename(改名)
-        根据屏幕左右边缘自动调整在狐狸左侧或右侧展开，绝不超出屏幕！
-        """
-        s = self.scale_factor
-        cx, cy, fw, fh = self._fox_anchor()
-        btn_d = Theme.BTN_CIRCLE_SIZE * s
-        place_right = self._is_near_left_edge() and not self._is_near_right_edge()
-        side_sign = 1.0 if place_right else -1.0
-
-        keys = ["feed", "drink", "play", "clean", "rename"]
-        angles_deg = [-44, -22, 0, 22, 44]
-        radius_x = fw * 0.54
-        radius_y = fh * 0.46
-
-        # 结合菜单展开动画产生轻微位移与缩放
-        slide = (1.0 - ease_out_cubic(self.menu_visible_prog)) * 14.0 * s
-        rects: dict[str, QRectF] = {}
-        for k, deg in zip(keys, angles_deg):
-            rad = math.radians(deg)
-            bx = cx + side_sign * (radius_x * math.cos(rad) - slide)
-            by = cy + radius_y * math.sin(rad)
-            rects[k] = QRectF(bx - btn_d / 2.0, by - btn_d / 2.0, btn_d, btn_d)
-        return rects
-
-    def _get_status_strip_rect(self) -> QRectF:
-        """狐狸脚下轻盈紧凑的磨砂胶囊状态条"""
-        s = self.scale_factor
-        cx, cy, fw, fh = self._fox_anchor()
-        sw = 228.0 * s
-        sh = 22.0 * s
-        sy = min(self.height() - sh - 6 * s, cy + fh * 0.47)
-        return QRectF(cx - sw / 2.0, sy, sw, sh)
-
-    def _get_food_menu_rect(self) -> QRectF:
-        """点击喂食按钮后在狐狸旁边弹出的精致小型食物菜单（自动避让屏幕边缘）"""
-        s = self.scale_factor
-        cx, cy, fw, _ = self._fox_anchor()
-        mw = 136.0 * s
-        mh = 148.0 * s
-        place_right = not self._is_near_right_edge()
-        mx = (cx + fw * 0.28) if place_right else (cx - fw * 0.28 - mw)
-        mx = max(6.0, min(self.width() - mw - 6.0, mx))
-        my = max(16.0, min(self.height() - mh - 36.0, cy - mh * 0.5))
-        return QRectF(mx, my, mw, mh)
-
-    def _get_food_item_rects(self) -> list[tuple[FoodItem, QRectF]]:
-        menu_r = self._get_food_menu_rect()
-        s = self.scale_factor
-        pad_x = 8.0 * s
-        pad_top = 28.0 * s
-        row_h = 28.0 * s
-        out = []
-        for idx, item in enumerate(FOOD_MENU_ITEMS):
-            r = QRectF(
-                menu_r.left() + pad_x,
-                menu_r.top() + pad_top + idx * (row_h + 2 * s),
-                menu_r.width() - pad_x * 2,
-                row_h,
-            )
-            out.append((item, r))
-        return out
-
-    # ==========================================================================
-    # 主动画状态机与帧循环 (60FPS 活跃 / 24FPS 空闲节能)
+    # 主帧循环与状态优先级
     # ==========================================================================
     def _determine_priority_state(self) -> AnimPriorityState:
-        """严格按照优先级确定当前主导动画状态，杜绝多个动画冲突"""
-        if self.drag_hover_file or self.rename_bar.isVisible():
+        if self.drag_hover_file:
             return AnimPriorityState.FILE_DROP
         if self.dragging:
             return AnimPriorityState.DRAGGING
@@ -1060,7 +1026,7 @@ class ShajinFoxPet(QWidget):
             return AnimPriorityState.FEEDING
         if self.click_anim_active:
             return AnimPriorityState.CLICK_REACT
-        if self.dock_state != DockState.FREE and self.dock_state != DockState.EXPANDED_HOLD:
+        if self.dock_state not in (DockState.FREE, DockState.EXPANDED_HOLD):
             return AnimPriorityState.TUCK_DOCK
         return AnimPriorityState.IDLE
 
@@ -1071,11 +1037,9 @@ class ShajinFoxPet(QWidget):
         self.elapsed_time += dt
 
         self.anim_state = self._determine_priority_state()
+        self.breath_phase += dt * 2.0
 
-        # 1. 呼吸相位持续推进（极小幅度）
-        self.breath_phase += dt * 2.1
-
-        # 2. 鼠标悬停缓动 (200ms)
+        # 悬停放大 3% 缓动
         target_hover = 1.0 if (self.is_mouse_inside or self.drag_hover_file) else 0.0
         step_h = dt / AnimConfig.HOVER_DUR
         if self.hover_progress < target_hover:
@@ -1083,120 +1047,108 @@ class ShajinFoxPet(QWidget):
         elif self.hover_progress > target_hover:
             self.hover_progress = max(target_hover, self.hover_progress - step_h)
 
-        # 按钮悬停缩放缓动 (180ms)
-        for k in ("feed", "drink", "play", "clean", "rename"):
-            t_val = 1.0 if self.hovered_btn_id == k else 0.0
-            cur = self.btn_hover_prog.get(k, 0.0)
-            if cur < t_val:
-                self.btn_hover_prog[k] = min(t_val, cur + dt / 0.18)
-            elif cur > t_val:
-                self.btn_hover_prog[k] = max(t_val, cur - dt / 0.18)
-
-        # 3. 环绕菜单淡入/淡出与非交互自动隐藏
-        should_show_menu = (
-            (self.is_mouse_inside or self.food_menu_open or self.menu_hide_countdown > 0.0)
+        # 底部横向胶囊工具栏淡入/自动隐藏
+        should_show_toolbar = (
+            (self.is_mouse_inside or self.food_card_open or self.size_card_open or self.toolbar_hide_countdown > 0.0)
             and not self.dragging
             and self.dock_sink_progress < 0.15
         )
-        if self.is_mouse_inside or self.food_menu_open:
-            self.menu_hide_countdown = AnimConfig.MENU_HIDE_DELAY
-        elif self.menu_hide_countdown > 0.0:
-            self.menu_hide_countdown = max(0.0, self.menu_hide_countdown - dt)
+        if self.is_mouse_inside or self.food_card_open or self.size_card_open:
+            self.toolbar_hide_countdown = AnimConfig.MENU_HIDE_DELAY
+        elif self.toolbar_hide_countdown > 0.0:
+            self.toolbar_hide_countdown = max(0.0, self.toolbar_hide_countdown - dt)
 
-        old_menu_vis = self.menu_visible_prog > 0.05
-        if should_show_menu:
-            self.menu_visible_prog = min(1.0, self.menu_visible_prog + dt / AnimConfig.MENU_FADE_DUR)
+        if should_show_toolbar:
+            self.toolbar_prog = min(1.0, self.toolbar_prog + dt / AnimConfig.MENU_FADE_DUR)
         else:
-            self.menu_visible_prog = max(0.0, self.menu_visible_prog - dt / AnimConfig.MENU_FADE_DUR)
-            if self.menu_visible_prog <= 0.02:
-                self.food_menu_open = False
-        if (self.menu_visible_prog > 0.05) != old_menu_vis:
-            self.update_window_mask()
+            self.toolbar_prog = max(0.0, self.toolbar_prog - dt / AnimConfig.MENU_FADE_DUR)
+            if self.toolbar_prog <= 0.02:
+                self.food_card_open = False
+                self.size_card_open = False
 
-        # 小型食物菜单弹出缓动
-        target_fm = 1.0 if self.food_menu_open else 0.0
-        if self.food_menu_prog < target_fm:
-            self.food_menu_prog = min(target_fm, self.food_menu_prog + dt / 0.20)
-        elif self.food_menu_prog > target_fm:
-            self.food_menu_prog = max(target_fm, self.food_menu_prog - dt / 0.18)
+        # 点心卡片与滑块卡片缓动
+        t_fc = 1.0 if self.food_card_open else 0.0
+        if self.food_card_prog < t_fc:
+            self.food_card_prog = min(t_fc, self.food_card_prog + dt / 0.18)
+        elif self.food_card_prog > t_fc:
+            self.food_card_prog = max(t_fc, self.food_card_prog - dt / 0.16)
 
-        # 4. 单击软弹反馈更新 (160ms)
+        t_sc = 1.0 if self.size_card_open else 0.0
+        if self.size_card_prog < t_sc:
+            self.size_card_prog = min(t_sc, self.size_card_prog + dt / 0.18)
+        elif self.size_card_prog > t_sc:
+            self.size_card_prog = max(t_sc, self.size_card_prog - dt / 0.16)
+
         if self.click_anim_active:
             self.click_anim_t += dt / AnimConfig.CLICK_DUR
             if self.click_anim_t >= 1.0:
                 self.click_anim_t = 0.0
                 self.click_anim_active = False
 
-        # 5. 拖拽倾斜回弹阻尼
         if not self.dragging:
             self.drag_tilt_deg *= math.pow(0.001, dt)
             if abs(self.drag_tilt_deg) < 0.05:
                 self.drag_tilt_deg = 0.0
 
-        # 6. 顺序喂食动画更新
         if self.feeding_active:
             self._update_feeding_sequence(dt)
 
-        # 7. 屏幕底部探头收纳状态机更新
         self._update_dock_state_machine(dt)
 
-        # 8. 待机随机小动作（仅在 IDLE 优先级且未完全收纳时触发，间隔随机化）
+        # 待机随机小动作
         if self.anim_state == AnimPriorityState.IDLE and self.dock_sink_progress < 0.1:
             if self.idle_quirk_type:
                 self.idle_quirk_t += dt / self.idle_quirk_dur
                 if self.idle_quirk_t >= 1.0:
                     self.idle_quirk_type = ""
                     self.idle_quirk_t = 0.0
-                    self.idle_quirk_timer = random.uniform(5.5, 12.0)
+                    self.idle_quirk_timer = random.uniform(6.0, 13.0)
             else:
                 self.idle_quirk_timer -= dt
                 if self.idle_quirk_timer <= 0.0:
                     self.idle_quirk_type = random.choice(["tilt", "stretch", "hop"])
-                    self.idle_quirk_dur = random.uniform(0.75, 1.15)
+                    self.idle_quirk_dur = random.uniform(0.75, 1.10)
                     self.idle_tilt_dir = random.choice([-1.0, 1.0])
                     self.idle_quirk_t = 0.0
         else:
             self.idle_quirk_type = ""
             self.idle_quirk_t = 0.0
 
-        # 9. 对话气泡淡入与自动消失
         if self.bubble_hold_timer > 0.0:
             self.bubble_hold_timer -= dt
             self.bubble_alpha_prog = min(1.0, self.bubble_alpha_prog + dt / AnimConfig.BUBBLE_IN_DUR)
         else:
             self.bubble_alpha_prog = max(0.0, self.bubble_alpha_prog - dt / AnimConfig.BUBBLE_OUT_DUR)
 
-        # 10. 粒子更新
         for pt in self.particles[:]:
             pt["life"] += dt
             pt["x"] += pt["vx"] * dt
             pt["y"] += pt["vy"] * dt
-            pt["vy"] += 22.0 * dt  # 柔和轻盈阻尼
+            pt["vy"] += 20.0 * dt
             if pt["life"] >= pt["max_life"]:
                 self.particles.remove(pt)
 
-        # 11. 空闲自动降低刷新频率以节约 CPU
-        has_active_motion = (
+        has_motion = (
             self.anim_state != AnimPriorityState.IDLE
             or bool(self.idle_quirk_type)
             or bool(self.particles)
             or self.bubble_alpha_prog > 0.01
-            or 0.01 < self.menu_visible_prog < 0.99
+            or 0.01 < self.toolbar_prog < 0.99
+            or 0.01 < self.food_card_prog < 0.99
+            or 0.01 < self.size_card_prog < 0.99
             or 0.01 < self.hover_progress < 0.99
         )
-        desired_interval = AnimConfig.DT_ACTIVE_MS if has_active_motion else AnimConfig.DT_IDLE_MS
-        if self.frame_timer.interval() != desired_interval:
-            self.frame_timer.setInterval(desired_interval)
+        desired_ms = AnimConfig.DT_ACTIVE_MS if has_motion else AnimConfig.DT_IDLE_MS
+        if self.frame_timer.interval() != desired_ms:
+            self.frame_timer.setInterval(desired_ms)
 
         self.update()
 
     def _on_bio_tick(self):
-        """真实动物生理代谢与消化计算"""
-        self.hunger = max(0.0, self.hunger - 0.38)
-        self.thirst = max(0.0, self.thirst - 0.44)
-        self.fun = max(0.0, self.fun - (0.36 + len(self.poops) * 0.25))
+        self.hunger = max(0.0, self.hunger - 0.36)
+        self.thirst = max(0.0, self.thirst - 0.42)
+        self.fun = max(0.0, self.fun - (0.34 + len(self.poops) * 0.25))
 
-        # 肠胃消化：只有胃里有食物时才逐步转化为便意进度
         if self.food_in_gut > 0.1:
             hydration_mult = 1.22 if self.thirst >= 45.0 else 0.72
             step = min(self.food_in_gut, 2.8 * hydration_mult)
@@ -1204,12 +1156,11 @@ class ShajinFoxPet(QWidget):
             self.digestion_progress = min(100.0, self.digestion_progress + step * 1.12)
             self._check_digestion_to_poop()
 
-        # 偶尔自主冒出小气泡（收纳状态下降低频率保持安静陪伴）
         if (
             self.bubble_alpha_prog <= 0.01
             and not self.hide_all_text
             and self.dock_sink_progress < 0.5
-            and random.random() < 0.22
+            and random.random() < 0.20
         ):
             if self.poops and random.random() < 0.55:
                 self.show_speech(random.choice(POOP_QUOTES))
@@ -1217,27 +1168,25 @@ class ShajinFoxPet(QWidget):
                 self.show_speech(random.choice(HUNGRY_QUOTES))
             elif self.thirst < 32.0:
                 self.show_speech(random.choice(THIRSTY_QUOTES))
-            elif self.fun < 32.0:
-                self.show_speech(random.choice(BORED_QUOTES))
             else:
                 self.show_speech(random.choice(IDLE_QUOTES))
 
         self.save_state()
 
     # ==========================================================================
-    # 右键菜单与设置项
+    # 右键菜单
     # ==========================================================================
     def _build_context_menu(self) -> QMenu:
         menu = QMenu(self)
         menu.setStyleSheet(
             """
             QMenu {
-                background-color: #FDFAF3;
-                color: #523A42;
-                border: 1.5px solid #7CC6B8;
+                background-color: #F5F6F3;
+                color: #3A4440;
+                border: 1.5px solid #E2E4DE;
                 border-radius: 14px;
                 padding: 6px;
-                font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+                font-family: "Microsoft YaHei", sans-serif;
                 font-size: 12px;
                 font-weight: bold;
             }
@@ -1246,30 +1195,31 @@ class ShajinFoxPet(QWidget):
                 border-radius: 8px;
             }
             QMenu::item:selected {
-                background-color: #DAF2EC;
-                color: #523A42;
+                background-color: #CBE0D6;
+                color: #3B4D46;
             }
             QMenu::separator {
                 height: 1px;
-                background: #EAE2D6;
+                background: #E2E4DE;
                 margin: 4px 8px;
             }
             """
         )
 
-        menu.addAction("🍰 打开小食物菜单投喂", self.toggle_food_menu)
-        menu.addAction("🍵 喂星光蜜桃茶 (+水分)", self.action_drink)
-        menu.addAction("🎲 陪小狐狸掷骰子 (+心情)", self.action_play_toy)
-        menu.addAction(f"🧹 清理小便便 ({len(self.poops)})", self.action_clean_poop)
+        menu.addAction("🍴 今天想吃点什么？（点心面板）", self.toggle_food_card)
+        menu.addAction("Aa 把文件交给我（批量改名）", lambda: self.open_rename_dialog())
+        menu.addAction("🎚️ 滑块调节大小与状态面板", self.toggle_size_card)
+        if self.poops:
+            menu.addAction(f"🧹 清理小便便 ({len(self.poops)})", self._clean_all_poops)
 
         menu.addSeparator()
 
-        act_autotuck = QAction(
+        act_tuck = QAction(
             "✓ 开启底部自动探头收纳" if self.auto_tuck_enabled else "○ 开启底部自动探头收纳",
             self,
         )
-        act_autotuck.triggered.connect(self._toggle_auto_tuck)
-        menu.addAction(act_autotuck)
+        act_tuck.triggered.connect(self._toggle_auto_tuck)
+        menu.addAction(act_tuck)
 
         act_pin = QAction(
             "✓ 固定展开（不自动沉回底部）" if self.pin_expanded else "○ 固定展开（不自动沉回底部）",
@@ -1279,90 +1229,62 @@ class ShajinFoxPet(QWidget):
         menu.addAction(act_pin)
 
         if self.dock_state == DockState.FREE:
-            menu.addAction("🐾 立即贴到底部探头收纳", self._manual_tuck_now)
+            menu.addAction("⊻ 立即藏进屏幕底部", self._manual_tuck_now)
         else:
-            menu.addAction("🐾 退出底部收纳回到桌面", self._exit_dock_mode)
+            menu.addAction("🐾 唤出并回到桌面", self._exit_dock_mode)
 
         menu.addSeparator()
-
-        act_text = QAction(
-            "👁️ 显示气泡与状态胶囊" if self.hide_all_text else "🙈 隐藏所有文本框（纯享模式）",
+        act_txt = QAction(
+            "👁️ 恢复显示文字气泡" if self.hide_all_text else "🙈 隐藏所有文字气泡",
             self,
         )
-        act_text.triggered.connect(self._toggle_hide_text)
-        menu.addAction(act_text)
-
-        size_menu = menu.addMenu(f"🔍 调节小狐狸大小 ({int(self.scale_factor * 100)}%)")
-        size_menu.addAction("放大 (+15%)", lambda: self.set_pet_scale(self.scale_factor + 0.15))
-        size_menu.addAction("缩小 (-15%)", lambda: self.set_pet_scale(self.scale_factor - 0.15))
-        size_menu.addSeparator()
-        for pct in (75, 90, 100, 115, 135):
-            size_menu.addAction(f"设为 {pct}%", lambda p=pct: self.set_pet_scale(p / 100.0))
-
-        menu.addAction("📁 选择文件添加后缀...", self.open_manual_rename_picker)
+        act_txt.triggered.connect(self._toggle_hide_text)
+        menu.addAction(act_txt)
 
         menu.addSeparator()
         menu.addAction("🚪 退出小狐狸桌宠", self.quit_pet)
         return menu
 
+    def _clean_all_poops(self):
+        self.poops.clear()
+        self.fun = min(100.0, self.fun + 10.0)
+        self.trigger_click_bounce()
+        self.show_speech("清理干净啦～")
+        self.save_state()
+
     def _toggle_auto_tuck(self):
         self.auto_tuck_enabled = not self.auto_tuck_enabled
         if not self.auto_tuck_enabled and self.dock_state != DockState.FREE:
             self._exit_dock_mode()
-        self.show_speech("已开启底部自动收纳～" if self.auto_tuck_enabled else "已关闭底部自动收纳～", force=True)
         self.save_state()
 
     def _toggle_pin_expanded(self):
         self.pin_expanded = not self.pin_expanded
         if self.pin_expanded and self.dock_state in (DockState.TUCKED, DockState.SINKING):
             self._start_expand_full()
-        self.show_speech("已固定展开姿态～" if self.pin_expanded else "已恢复自动沉回底部～", force=True)
         self.save_state()
 
     def _manual_tuck_now(self):
         self.auto_tuck_enabled = True
         self.pin_expanded = False
         self._start_sink_to_bottom()
-        self.show_speech("偷偷藏进屏幕底边观察你～")
 
     def _exit_dock_mode(self):
         self.dock_state = DockState.FREE
         self.dock_sink_progress = 0.0
         avail = self._current_screen_geometry()
-        self.move(self.x(), max(avail.top() + 20, avail.bottom() - self.height() - 65))
-        self.update_window_mask()
+        self.move(self.x(), max(avail.top() + 20, avail.bottom() - self.height() - 60))
         self.update()
 
     def _toggle_hide_text(self):
         self.hide_all_text = not self.hide_all_text
         if self.hide_all_text:
-            self.rename_bar.close_bar()
             self.bubble_hold_timer = 0.0
             self.bubble_alpha_prog = 0.0
         else:
-            self.show_speech("气泡与状态胶囊已恢复显示～", force=True)
+            self.show_speech("文字气泡已开启～", force=True)
         self.save_state()
-        self.update_window_mask()
         self.update()
-
-    def set_pet_scale(self, new_scale: float):
-        old_bottom = self.y() + self.height()
-        old_cx = self.x() + self.width() // 2
-        self.scale_factor = max(0.65, min(1.55, round(new_scale, 2)))
-        self._apply_scale_size()
-        self.move(old_cx - self.width() // 2, old_bottom - self.height())
-        if self.dock_state != DockState.FREE:
-            self._align_window_to_screen_bottom()
-        self.update_window_mask()
-        self.show_speech(f"体型已调整为 {int(self.scale_factor * 100)}%～")
-        self.save_state()
-
-    def open_manual_rename_picker(self):
-        self.food_menu_open = False
-        files, _ = QFileDialog.getOpenFileNames(self, "选择要添加后缀的文件")
-        if files:
-            self._layout_rename_bar()
-            self.rename_bar.open_for_files([Path(f) for f in files])
 
     def quit_pet(self):
         self.save_state()
@@ -1370,36 +1292,30 @@ class ShajinFoxPet(QWidget):
         QApplication.quit()
 
     # ==========================================================================
-    # 鼠标、悬停、拖拽、滚轮与文件拖放事件
+    # 鼠标、滑块拖动与文件拖放事件
     # ==========================================================================
     def enterEvent(self, event):
         self.is_mouse_inside = True
-        self.menu_hide_countdown = AnimConfig.MENU_HIDE_DELAY
+        self.toolbar_hide_countdown = AnimConfig.MENU_HIDE_DELAY
         self.frame_timer.setInterval(AnimConfig.DT_ACTIVE_MS)
-
-        # 核心需求四.6 & 8：当处于收纳或正在下沉时，鼠标移到露出的脑袋上立即触发探头序列
         if self.dock_state in (DockState.TUCKED, DockState.SINKING):
             self._start_peek_sequence()
-        self.update_window_mask()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
         self.is_mouse_inside = False
         self.hovered_btn_id = ""
+        self.hovered_snack_idx = -1
         self.frame_timer.setInterval(AnimConfig.DT_ACTIVE_MS)
         super().leaveEvent(event)
 
     def wheelEvent(self, event: QWheelEvent):
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            step = 0.08 if event.angleDelta().y() > 0 else -0.08
-            self.set_pet_scale(self.scale_factor + step)
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier or self.size_card_open:
+            step = 0.06 if event.angleDelta().y() > 0 else -0.06
+            self.set_pet_scale(self.scale_factor + step, announce=True)
             event.accept()
         else:
             super().wheelEvent(event)
-
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._toggle_hide_text()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.RightButton:
@@ -1413,47 +1329,54 @@ class ShajinFoxPet(QWidget):
         s = self.scale_factor
         cx, cy, _, _ = self._fox_anchor()
 
-        # 1. 若小型食物菜单打开，检查是否点击了某项食物
-        if self.food_menu_open and self.food_menu_prog > 0.5:
-            for item, rect in self._get_food_item_rects():
-                if rect.contains(pos):
-                    self.start_feeding_sequence(item, rect.center())
-                    return
-            if not self._get_food_menu_rect().contains(pos):
-                self.food_menu_open = False
-                self.update_window_mask()
+        # 1. 检查是否正在操作「大小调节滑块卡片」
+        if self.size_card_open and self.size_card_prog > 0.5:
+            track = self._get_slider_track_rect().adjusted(-8, -8, 8, 8)
+            if track.contains(pos):
+                self.dragging_slider = True
+                self._set_scale_from_slider_x(pos.x())
+                return
+            if not self._get_size_slider_card_rect().contains(pos) and not self._get_pill_toolbar_rect().contains(pos):
+                self.size_card_open = False
 
-        # 2. 检查是否点击了圆形功能按钮
-        if self.menu_visible_prog > 0.35 and self.dock_sink_progress < 0.25:
-            for key, rect in self._get_circular_button_rects().items():
+        # 2. 检查是否点击了「今天想吃点什么？」1×4 点心卡片
+        if self.food_card_open and self.food_card_prog > 0.5:
+            for item, tile_r, hit_r in self._get_snack_tile_rects():
+                if hit_r.contains(pos):
+                    self.start_feeding_snack(item, tile_r.center())
+                    return
+            if not self._get_snack_card_rect().contains(pos) and not self._get_pill_toolbar_rect().contains(pos):
+                self.food_card_open = False
+
+        # 3. 检查是否点击了狐狸正下方的横向胶囊工具栏（🍴 / Aa / ⊻ / ···）
+        if self.toolbar_prog > 0.35 and self.dock_sink_progress < 0.25:
+            for key, rect in self._get_pill_toolbar_buttons().items():
                 if rect.contains(pos):
                     if key == "feed":
-                        self.toggle_food_menu()
-                    elif key == "drink":
-                        self.action_drink()
-                    elif key == "play":
-                        self.action_play_toy()
-                    elif key == "clean":
-                        self.action_clean_poop()
+                        self.toggle_food_card()
                     elif key == "rename":
-                        self.open_manual_rename_picker()
+                        self.open_rename_dialog()
+                    elif key == "tuck":
+                        self._manual_tuck_now()
+                    elif key == "more":
+                        self.toggle_size_card()
                     return
 
-        # 3. 检查是否点击了地面上的便便
+        # 4. 检查是否点击了地面小便便
         for idx, poop in enumerate(self.poops):
             px = cx + poop["rx"] * s
             py = cy + poop["ry"] * s
-            if math.hypot(pos.x() - px, pos.y() - py) <= 22 * s:
+            if math.hypot(pos.x() - px, pos.y() - py) <= 20 * max(0.7, s):
                 self.poops.pop(idx)
                 self.spawn_gentle_particles(count=3, kind="star", origin=QPointF(px, py))
-                self.show_speech("谢谢你帮我清掉小便便～")
+                self.show_speech("清理干净啦～")
                 self.save_state()
-                self.update_window_mask()
                 return
 
-        # 4. 开始拖动或单击狐狸（若在底部收纳展开状态被拖走，支持直接退出底部吸附状态）
+        # 5. 开始拖动或轻点小狐狸
         self.dragging = True
-        self.food_menu_open = False
+        self.food_card_open = False
+        self.size_card_open = False
         gpos = event.globalPosition().toPoint()
         self.mouse_down_global = gpos
         self.last_drag_global = gpos
@@ -1463,16 +1386,18 @@ class ShajinFoxPet(QWidget):
     def mouseMoveEvent(self, event):
         pos = event.position()
 
+        if self.dragging_slider and (event.buttons() & Qt.MouseButton.LeftButton):
+            self._set_scale_from_slider_x(pos.x())
+            return
+
         if self.dragging and (event.buttons() & Qt.MouseButton.LeftButton):
             gpos = event.globalPosition().toPoint()
             dx = gpos.x() - self.last_drag_global.x()
             self.last_drag_global = gpos
 
-            # 根据拖动水平方向产生轻微自然的倾斜角（限制在 -9° ~ +9° 内，绝不剧烈变形）
-            target_tilt = max(-9.0, min(9.0, dx * 0.65))
+            target_tilt = max(-8.5, min(8.5, dx * 0.6))
             self.drag_tilt_deg = self.drag_tilt_deg * 0.65 + target_tilt * 0.35
 
-            # 若从底部收纳展开状态拖离底部，立即退出底部吸附状态
             if (gpos - self.mouse_down_global).manhattanLength() > 10 and self.dock_state != DockState.FREE:
                 self.dock_state = DockState.FREE
                 self.dock_sink_progress = 0.0
@@ -1481,10 +1406,9 @@ class ShajinFoxPet(QWidget):
             avail = self._current_screen_geometry()
             dist_bottom = avail.bottom() - (new_top_left.y() + self.height())
 
-            # 拖动接近底部 30~50px 时提供轻微的磁吸阻尼反馈
             if self.auto_tuck_enabled and -15 <= dist_bottom <= AnimConfig.SNAP_BOTTOM_DIST:
                 self.near_bottom_magnet = True
-                magnet_y = avail.bottom() - self.height() + 2
+                magnet_y = avail.bottom() - self.height() + 1
                 blended_y = int(new_top_left.y() * 0.55 + magnet_y * 0.45)
                 self.move(new_top_left.x(), blended_y)
             else:
@@ -1492,54 +1416,63 @@ class ShajinFoxPet(QWidget):
                 self.move(new_top_left)
             return
 
-        # 非拖拽时检测圆形按钮悬停
-        new_hover_btn = ""
-        if self.menu_visible_prog > 0.35 and self.dock_sink_progress < 0.25:
-            for key, rect in self._get_circular_button_rects().items():
-                if rect.contains(pos):
-                    new_hover_btn = key
+        # 悬停反馈检测
+        hover_btn = ""
+        hover_snack = -1
+        if self.food_card_open and self.food_card_prog > 0.5:
+            for idx, (_, _, hit_r) in enumerate(self._get_snack_tile_rects()):
+                if hit_r.contains(pos):
+                    hover_snack = idx
                     break
-        if new_hover_btn != self.hovered_btn_id:
-            self.hovered_btn_id = new_hover_btn
+        if hover_snack == -1 and self.toolbar_prog > 0.35 and self.dock_sink_progress < 0.25:
+            for key, rect in self._get_pill_toolbar_buttons().items():
+                if rect.contains(pos):
+                    hover_btn = key
+                    break
+
+        if hover_btn != self.hovered_btn_id or hover_snack != self.hovered_snack_idx:
+            self.hovered_btn_id = hover_btn
+            self.hovered_snack_idx = hover_snack
             self.setCursor(
                 QCursor(Qt.CursorShape.PointingHandCursor)
-                if new_hover_btn
+                if (hover_btn or hover_snack >= 0)
                 else QCursor(Qt.CursorShape.ArrowCursor)
             )
-            self.frame_timer.setInterval(AnimConfig.DT_ACTIVE_MS)
+            self.update()
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.dragging:
-            self.dragging = False
-            self.near_bottom_magnet = False
-            gpos = event.globalPosition().toPoint()
-            move_dist = (gpos - self.mouse_down_global).manhattanLength()
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.dragging_slider:
+                self.dragging_slider = False
+                self.save_state()
+                return
 
-            if move_dist < 6:
-                # 单击互动：轻轻压缩回弹 + 2~5 个小爱心/星星/金色粒子 + 互动小气泡
-                if self.dock_state in (DockState.TUCKED, DockState.SINKING):
-                    self._start_expand_full()
-                else:
-                    self.trigger_click_bounce()
-                    self.spawn_gentle_particles(count=random.randint(3, 5), kind="mixed")
-                    self.fun = min(100.0, self.fun + 3.5)
-                    self.show_speech(random.choice(CLICK_QUOTES))
-            else:
-                # 检查是否松开在屏幕底部磁吸区（约 42px 内）
-                dist_bottom = self._distance_to_screen_bottom()
-                if self.auto_tuck_enabled and -30 <= dist_bottom <= AnimConfig.SNAP_BOTTOM_DIST:
-                    if self.pin_expanded:
-                        self._align_window_to_screen_bottom()
-                        self.dock_state = DockState.EXPANDED_HOLD
+            if self.dragging:
+                self.dragging = False
+                self.near_bottom_magnet = False
+                gpos = event.globalPosition().toPoint()
+                move_dist = (gpos - self.mouse_down_global).manhattanLength()
+
+                if move_dist < 6:
+                    if self.dock_state in (DockState.TUCKED, DockState.SINKING):
+                        self._start_expand_full()
                     else:
-                        self.show_speech("偷偷躲在屏幕边看你工作～")
-                        self._start_sink_to_bottom()
+                        self.trigger_click_bounce()
+                        self.spawn_gentle_particles(count=random.randint(3, 5), kind="mixed")
+                        self.fun = min(100.0, self.fun + 3.5)
+                        self.show_speech(random.choice(CLICK_QUOTES))
                 else:
-                    self.dock_state = DockState.FREE
-                    self.dock_sink_progress = 0.0
-            self.update_window_mask()
+                    dist_bottom = self._distance_to_screen_bottom()
+                    if self.auto_tuck_enabled and -30 <= dist_bottom <= AnimConfig.SNAP_BOTTOM_DIST:
+                        if self.pin_expanded:
+                            self._align_window_to_screen_bottom()
+                            self.dock_state = DockState.EXPANDED_HOLD
+                        else:
+                            self._start_sink_to_bottom()
+                    else:
+                        self.dock_state = DockState.FREE
+                        self.dock_sink_progress = 0.0
 
-    # ------------------ 文件拖放事件（核心需求五） ------------------
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             urls = [u for u in event.mimeData().urls() if u.isLocalFile()]
@@ -1563,77 +1496,61 @@ class ShajinFoxPet(QWidget):
         paths = [Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()]
         if paths:
             event.acceptProposedAction()
-            self._layout_rename_bar()
-            self.rename_bar.open_for_files(paths)
+            QTimer.singleShot(30, lambda: self.open_rename_dialog(paths))
         self.update()
 
     # ==========================================================================
-    # 程序化姿态合成与精致 UI 绘制 (paintEvent)
+    # 绘制渲染（1:1 复刻参考图视觉）
     # ==========================================================================
     def _compute_fox_transform_params(self) -> tuple[float, float, float, float, float]:
-        """
-        根据统一动画状态机合成当前帧狐狸的：
-        (offset_x, offset_y, scale_x, scale_y, rotate_deg)
-        严格保持单张 PNG 原画完整性，仅做轻柔自然的微形变（绝不强制拉伸变形）。
-        """
         s = self.scale_factor
-        # 1. 基础呼吸浮动（极小幅度上下浮动 2.5px + 0.8% 呼吸缩放）
         breath_sin = math.sin(self.breath_phase)
         ox = 0.0
-        oy = breath_sin * 2.4 * s
+        oy = breath_sin * 2.0 * s
         sx = 1.0 - breath_sin * 0.006
         sy = 1.0 + breath_sin * 0.008
-        rot = math.sin(self.breath_phase * 0.5) * 0.9
+        rot = math.sin(self.breath_phase * 0.5) * 0.8
 
-        # 2. 鼠标悬停或文件靠近：轻微抬起 (-4px) + 放大 3%（自然缓动）
         hk = ease_out_cubic(self.hover_progress)
         oy += AnimConfig.HOVER_LIFT_PX * s * hk
         hover_scale = 1.0 + (AnimConfig.HOVER_SCALE - 1.0) * hk
         sx *= hover_scale
         sy *= hover_scale
 
-        # 3. 按状态优先级叠加专属动作，互不冲突
         if self.anim_state == AnimPriorityState.FILE_DROP and self.drag_hover_file:
-            oy -= 3.5 * s
-            rot = math.sin(self.elapsed_time * 5.0) * 2.2
-
+            oy -= 3.0 * s
+            rot = math.sin(self.elapsed_time * 5.0) * 2.0
         elif self.anim_state == AnimPriorityState.DRAGGING:
             rot = self.drag_tilt_deg
-            oy -= 4.0 * s
-
+            oy -= 3.5 * s
         elif self.anim_state == AnimPriorityState.FEEDING:
             t = self.feeding_elapsed
-            # 阶段 3 (0.28~0.75s)：狐狸稍微前倾迎接食物
             if 0.22 <= t <= 0.82:
                 lean_k = math.sin(((t - 0.22) / 0.60) * math.pi)
-                rot -= 5.2 * lean_k
-                ox -= 3.5 * s * lean_k
-                oy -= 2.5 * s * lean_k
-            # 阶段 5 (0.86~1.16s)：吃完后开心轻轻弹跳
+                rot -= 5.0 * lean_k
+                ox -= 3.0 * s * lean_k
+                oy -= 2.0 * s * lean_k
             elif 0.86 < t <= 1.16:
                 hop_k = math.sin(((t - 0.86) / 0.30) * math.pi)
-                oy -= 9.5 * s * hop_k
-                sx *= 1.0 - 0.025 * hop_k
-                sy *= 1.0 + 0.032 * hop_k
-
+                oy -= 8.0 * s * hop_k
+                sx *= 1.0 - 0.022 * hop_k
+                sy *= 1.0 + 0.028 * hop_k
         elif self.anim_state == AnimPriorityState.CLICK_REACT:
-            # 单击：轻轻压缩，然后柔软回弹
             p = self.click_anim_t
             wave = math.sin(p * math.pi * 2.0) * math.exp(-p * 2.4)
-            sx *= 1.0 + 0.045 * wave
-            sy *= 1.0 - 0.045 * wave
-            oy += 3.5 * s * wave
-
+            sx *= 1.0 + 0.042 * wave
+            sy *= 1.0 - 0.042 * wave
+            oy += 3.0 * s * wave
         elif self.anim_state == AnimPriorityState.IDLE and self.idle_quirk_type:
             qk = math.sin(self.idle_quirk_t * math.pi)
             if self.idle_quirk_type == "tilt":
-                rot += 4.2 * self.idle_tilt_dir * qk
+                rot += 3.8 * self.idle_tilt_dir * qk
             elif self.idle_quirk_type == "stretch":
-                sy *= 1.0 + 0.026 * qk
-                sx *= 1.0 - 0.016 * qk
-                oy -= 3.0 * s * qk
+                sy *= 1.0 + 0.024 * qk
+                sx *= 1.0 - 0.015 * qk
+                oy -= 2.5 * s * qk
             elif self.idle_quirk_type == "hop":
-                oy -= 6.5 * s * qk
+                oy -= 5.5 * s * qk
 
         return ox, oy, sx, sy, rot
 
@@ -1643,43 +1560,43 @@ class ShajinFoxPet(QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
         s = self.scale_factor
+        us = self._ui_scale()
         cx, cy, fw, fh = self._fox_anchor()
         ox, oy, sx, sy, rot = self._compute_fox_transform_params()
         draw_cx = cx + ox
         draw_cy = cy + oy
 
-        # 1. 地面柔和阴影（当沉入屏幕底部时自动淡出）
+        # 1. 地面柔和椭圆浅影
         shadow_vis = max(0.0, 1.0 - self.dock_sink_progress * 1.6)
         if shadow_vis > 0.02:
-            sh_w = fw * 0.72 * shadow_vis
-            sh_h = 18.0 * s * shadow_vis
-            sh_y = cy + fh * 0.42
+            sh_w = fw * 0.68 * shadow_vis
+            sh_h = 14.0 * s * shadow_vis
+            sh_y = cy + fh * 0.43
             grad = QRadialGradient(QPointF(draw_cx, sh_y), sh_w * 0.55)
-            grad.setColorAt(0.0, QColor(68, 46, 54, int(56 * shadow_vis)))
-            grad.setColorAt(0.65, QColor(68, 46, 54, int(20 * shadow_vis)))
-            grad.setColorAt(1.0, QColor(68, 46, 54, 0))
+            grad.setColorAt(0.0, QColor(60, 68, 64, int(42 * shadow_vis)))
+            grad.setColorAt(1.0, QColor(60, 68, 64, 0))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(grad)
             painter.drawEllipse(QRectF(draw_cx - sh_w / 2.0, sh_y - sh_h / 2.0, sh_w, sh_h))
 
-        # 2. 拖动接近底部磁吸区时的柔和薄荷金底边提示线
+        # 2. 拖动接近屏幕底边磁吸时的细线提示
         if self.near_bottom_magnet:
-            pen = QPen(Theme.CHAMPAGNE_GOLD, 2.5 * s, Qt.PenStyle.DashLine)
+            pen = QPen(Theme.CHAMPAGNE_GOLD, 2.0 * us, Qt.PenStyle.DashLine)
             painter.setPen(pen)
-            painter.drawLine(int(cx - 85 * s), self.height() - 3, int(cx + 85 * s), self.height() - 3)
+            painter.drawLine(int(cx - 65 * us), self.height() - 2, int(cx + 65 * us), self.height() - 2)
 
-        # 3. 文件拖放靠近时的柔和香槟金虚线光环（核心需求五）
+        # 3. 拖放文件靠近时的柔和香槟金虚线光环
         if self.drag_hover_file:
             painter.save()
-            halo_r = QRectF(draw_cx - fw * 0.50, draw_cy - fh * 0.48, fw * 1.0, fh * 0.94)
-            pen = QPen(Theme.CHAMPAGNE_GOLD, 2.2 * s, Qt.PenStyle.DashLine)
-            pen.setDashOffset(self.elapsed_time * 12.0)
+            halo_r = QRectF(draw_cx - fw * 0.52, draw_cy - fh * 0.50, fw * 1.04, fh * 0.96)
+            pen = QPen(Theme.CHAMPAGNE_GOLD, 2.0 * us, Qt.PenStyle.DashLine)
+            pen.setDashOffset(self.elapsed_time * 10.0)
             painter.setPen(pen)
-            painter.setBrush(QColor(250, 239, 214, 38))
-            painter.drawRoundedRect(halo_r, 42 * s, 42 * s)
+            painter.setBrush(QColor(250, 244, 228, 32))
+            painter.drawRoundedRect(halo_r, 32 * s, 32 * s)
             painter.restore()
 
-        # 4. 绘制砂金小狐狸本体（保持原画比例完整性）
+        # 4. 绘制小狐狸本体（零荧光干净原画）
         if not self.pet_pixmap.isNull():
             painter.save()
             t = QTransform()
@@ -1694,260 +1611,314 @@ class ShajinFoxPet(QWidget):
             )
             painter.restore()
 
-        # 5. 绘制地面便便（仅在未收纳时显示）
+        # 5. 绘制地面小便便
         if self.dock_sink_progress < 0.3:
             for poop in self.poops:
                 px = cx + poop["rx"] * s
                 py = cy + poop["ry"] * s
-                self._draw_cute_poop(painter, px, py, s)
+                self._draw_cute_poop(painter, px, py, max(0.6, s))
 
-        # 6. 绘制 6 阶段顺序贝塞尔喂食动画中的食物轨迹
-        if self.feeding_active and self.feeding_food is not None:
-            self._draw_feeding_flight(painter, s)
+        # 6. 绘制 6 阶段贝塞尔喂食飞行点心
+        if self.feeding_active and self.feeding_snack is not None:
+            self._draw_feeding_flight(painter, us)
 
-        # 7. 绘制环绕式小圆形图标按钮与底部轻量状态胶囊（带淡入、缩放与位移缓动）
-        if self.menu_visible_prog > 0.02 and self.dock_sink_progress < 0.25:
-            self._draw_circular_menu_and_status(painter, s)
+        # 7. 绘制小狐狸正下方横向全圆角胶囊工具栏（🍴 / Aa / ⊻ / ···）
+        if self.toolbar_prog > 0.02 and self.dock_sink_progress < 0.25:
+            self._draw_reference_pill_toolbar(painter, us)
 
-        # 8. 绘制弹出式小型精致食物菜单
-        if self.food_menu_prog > 0.02 and self.dock_sink_progress < 0.25:
-            self._draw_food_popup_menu(painter, s)
+        # 8. 绘制参考图右下角同款「今天想吃点什么？」1×4 横向点心卡片
+        if self.food_card_prog > 0.02 and self.dock_sink_progress < 0.25:
+            self._draw_reference_snack_card(painter, us)
 
-        # 9. 绘制低饱和柔和粒子特效（小爱心、四角星、香槟金微光）
+        # 9. 绘制「滑块调大小 + 状态」悬浮卡片
+        if self.size_card_prog > 0.02 and self.dock_sink_progress < 0.25:
+            self._draw_size_slider_card(painter, us)
+
+        # 10. 绘制柔和粒子
         self._draw_gentle_particles(painter)
 
-        # 10. 绘制小巧圆角对话气泡（靠近狐狸头顶，自动避让屏幕顶部边缘）
+        # 11. 绘制头顶小巧圆角对话气泡
         if not self.hide_all_text and self.bubble_alpha_prog > 0.02 and self.bubble_text:
-            self._draw_speech_bubble(painter, draw_cx, draw_cy, fw, fh, s)
+            self._draw_speech_bubble(painter, draw_cx, draw_cy, fw, fh, us)
 
     # ==========================================================================
-    # 细分矢量绘制方法（统一线条粗细、磨砂质感、无廉价发光）
+    # 参考图同款组件绘制方法
     # ==========================================================================
-    def _draw_circular_menu_and_status(self, painter: QPainter, s: float):
+    def _draw_frosted_card(self, painter: QPainter, rect: QRectF, radius: float):
+        """绘制参考图同款奶油白轻拟物容器（弥散阴影 + 暖灰细外框 + 纯白内高光）"""
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(Theme.SHADOW_COLOR)
+        painter.drawRoundedRect(rect.translated(0, 3.0), radius, radius)
+
+        painter.setBrush(Theme.CARD_BG)
+        painter.setPen(QPen(Theme.BORDER_WARM, 1.2))
+        painter.drawRoundedRect(rect, radius, radius)
+
+        inner = rect.adjusted(1.2, 1.2, -1.2, -1.2)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(Theme.BORDER_INNER, 1.0))
+        painter.drawRoundedRect(inner, max(2.0, radius - 1.2), max(2.0, radius - 1.2))
+
+    def _draw_reference_pill_toolbar(self, painter: QPainter, us: float):
+        """1:1 绘制参考图左上角：小狐狸下方的横向全圆角胶囊工具栏（4 个线性图标）"""
         painter.save()
-        prog = ease_out_cubic(self.menu_visible_prog)
+        prog = ease_out_cubic(self.toolbar_prog)
         painter.setOpacity(prog)
 
-        # (A) 5 个精致小圆形矢量图标按钮
-        rects = self._get_circular_button_rects()
-        for key, rect in rects.items():
-            h_prog = ease_out_cubic(self.btn_hover_prog.get(key, 0.0))
-            scale_k = (0.85 + 0.15 * prog) * (1.0 + 0.08 * h_prog)
+        bar = self._get_pill_toolbar_rect()
+        slide_y = (1.0 - prog) * 6.0 * us
+        painter.translate(0, slide_y)
 
-            painter.save()
-            c = rect.center()
-            painter.translate(c)
-            painter.scale(scale_k, scale_k)
-            r_local = QRectF(-rect.width() / 2.0, -rect.height() / 2.0, rect.width(), rect.height())
+        self._draw_frosted_card(painter, bar, bar.height() * 0.5)
 
-            # 柔和阴影
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(Theme.SHADOW_SOFT)
-            painter.drawEllipse(r_local.translated(0, 2.0 * s))
-
-            # 奶油白磨砂圆底 + 薄荷/香槟描边
-            bg_col = Theme.MINT_LIGHT if h_prog > 0.3 else Theme.CREAM_WHITE
-            border_col = Theme.MINT_ACCENT if h_prog > 0.3 else Theme.MINT_BORDER
-            painter.setBrush(bg_col)
-            painter.setPen(QPen(border_col, Theme.PEN_WIDTH_CARD * s))
-            painter.drawEllipse(r_local)
-
-            # 统一粗细矢量小图标
-            self._draw_button_vector_icon(painter, key, r_local, s)
-            painter.restore()
-
-        # (B) 底部紧凑胶囊状态条（饱食 / 水分 / 心情 / 消化便意）
-        if not self.hide_all_text and not self.rename_bar.isVisible():
-            strip_r = self._get_status_strip_rect()
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(Theme.SHADOW_SOFT)
-            painter.drawRoundedRect(strip_r.translated(0, 1.5 * s), strip_r.height() / 2.0, strip_r.height() / 2.0)
-
-            painter.setBrush(Theme.CREAM_WHITE)
-            painter.setPen(QPen(Theme.MINT_BORDER, 1.3 * s))
-            painter.drawRoundedRect(strip_r, strip_r.height() / 2.0, strip_r.height() / 2.0)
-
-            items = [
-                ("饱食", self.hunger, Theme.MINT_ACCENT),
-                ("水分", self.thirst, QColor(118, 178, 224)),
-                ("心情", self.fun, Theme.CHAMPAGNE_GOLD),
-                ("消化", self.digestion_progress, Theme.LAVENDER_MAIN),
-            ]
-            seg_w = (strip_r.width() - 16 * s) / len(items)
-            painter.setFont(QFont("Microsoft YaHei", max(7, int(7.5 * s)), QFont.Weight.Bold))
-            for i, (lbl, val, col) in enumerate(items):
-                sx = strip_r.left() + 8 * s + i * seg_w
-                sy = strip_r.top() + 4 * s
-                # 微型胶囊进度条
-                bar_r = QRectF(sx + 24 * s, sy + 4.5 * s, seg_w - 28 * s, 5.5 * s)
+        btns = self._get_pill_toolbar_buttons()
+        for key, r in btns.items():
+            is_hov = (self.hovered_btn_id == key) or (
+                (key == "feed" and self.food_card_open)
+                or (key == "more" and self.size_card_open)
+            )
+            if is_hov:
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor(232, 226, 216))
-                painter.drawRoundedRect(bar_r, 2.8 * s, 2.8 * s)
+                painter.setBrush(Theme.MINT_BTN_BG)
+                painter.drawRoundedRect(r.adjusted(4 * us, 4 * us, -4 * us, -4 * us), 12 * us, 12 * us)
 
-                fill_w = max(2.0, bar_r.width() * max(0.0, min(1.0, val / 100.0)))
-                painter.setBrush(col)
-                painter.drawRoundedRect(QRectF(bar_r.left(), bar_r.top(), fill_w, bar_r.height()), 2.8 * s, 2.8 * s)
+            c = r.center()
+            pen = QPen(Theme.MINT_BTN_TEXT if is_hov else Theme.ICON_STROKE, 1.7 * us)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
 
-                painter.setPen(Theme.TEXT_PRIMARY)
-                painter.drawText(QRectF(sx, sy, 24 * s, 14 * s), Qt.AlignmentFlag.AlignVCenter, lbl)
+            if key == "feed":
+                # 🍴 线性小勺子与小叉子并排图标
+                sx = c.x() - 3.5 * us
+                fx = c.x() + 3.5 * us
+                painter.drawEllipse(QPointF(sx, c.y() - 3.5 * us), 2.2 * us, 3.0 * us)
+                painter.drawLine(QPointF(sx, c.y() - 0.5 * us), QPointF(sx, c.y() + 6.5 * us))
+                painter.drawLine(QPointF(fx - 2.0 * us, c.y() - 6.0 * us), QPointF(fx - 2.0 * us, c.y() - 1.5 * us))
+                painter.drawLine(QPointF(fx + 2.0 * us, c.y() - 6.0 * us), QPointF(fx + 2.0 * us, c.y() - 1.5 * us))
+                painter.drawLine(QPointF(fx - 2.0 * us, c.y() - 1.5 * us), QPointF(fx + 2.0 * us, c.y() - 1.5 * us))
+                painter.drawLine(QPointF(fx, c.y() - 1.5 * us), QPointF(fx, c.y() + 6.5 * us))
+
+            elif key == "rename":
+                # Aa 图标
+                font = QFont("Microsoft YaHei", max(8, int(9.5 * us)), QFont.Weight.Bold)
+                painter.setFont(font)
+                painter.drawText(r, Qt.AlignmentFlag.AlignCenter, "Aa")
+
+            elif key == "tuck":
+                # ⊻ 向下箭头落到横线上（收纳至屏幕底边图标）
+                painter.drawLine(QPointF(c.x(), c.y() - 6.0 * us), QPointF(c.x(), c.y() + 2.5 * us))
+                painter.drawLine(QPointF(c.x() - 4.0 * us, c.y() - 1.2 * us), QPointF(c.x(), c.y() + 2.8 * us))
+                painter.drawLine(QPointF(c.x() + 4.0 * us, c.y() - 1.2 * us), QPointF(c.x(), c.y() + 2.8 * us))
+                painter.drawLine(QPointF(c.x() - 5.5 * us, c.y() + 5.8 * us), QPointF(c.x() + 5.5 * us, c.y() + 5.8 * us))
+
+            elif key == "more":
+                # ··· 三个小圆点图标
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(Theme.MINT_BTN_TEXT if is_hov else Theme.ICON_STROKE)
+                for dx in (-5.0 * us, 0.0, 5.0 * us):
+                    painter.drawEllipse(QPointF(c.x() + dx, c.y()), 1.5 * us, 1.5 * us)
 
         painter.restore()
 
-    def _draw_button_vector_icon(self, painter: QPainter, key: str, r: QRectF, s: float):
-        """使用统一线条粗细绘制 5 个圆形按钮内的精致矢量图标"""
-        pen = QPen(Theme.TEXT_PRIMARY, Theme.PEN_WIDTH_ICON * s)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-
-        w = r.width() * 0.24
-        if key == "feed":
-            # 小糕点/餐盘图标
-            painter.setBrush(Theme.CHAMPAGNE_GOLD)
-            painter.drawRoundedRect(QRectF(-w, -w * 0.3, w * 2, w * 1.1), 3 * s, 3 * s)
-            painter.setBrush(Theme.ROSE_SOFT)
-            painter.drawEllipse(QPointF(0, -w * 0.55), w * 0.32, w * 0.32)
-        elif key == "drink":
-            # 茶杯图标
-            painter.setBrush(Theme.MINT_LIGHT)
-            painter.drawRoundedRect(QRectF(-w * 0.75, -w * 0.5, w * 1.5, w * 1.4), 2.5 * s, 2.5 * s)
-            painter.drawLine(QPointF(w * 0.2, -w * 0.5), QPointF(w * 0.55, -w * 1.0))
-        elif key == "play":
-            # 小骰子图标
-            painter.setBrush(Theme.CHAMPAGNE_SOFT)
-            painter.drawRoundedRect(QRectF(-w * 0.85, -w * 0.85, w * 1.7, w * 1.7), 3.5 * s, 3.5 * s)
-            painter.setBrush(Theme.TEXT_PRIMARY)
-            painter.drawEllipse(QPointF(0, 0), 1.4 * s, 1.4 * s)
-        elif key == "clean":
-            # 小扫帚/闪光清洁图标
-            painter.drawLine(QPointF(-w * 0.6, w * 0.6), QPointF(w * 0.6, -w * 0.6))
-            painter.setBrush(Theme.LAVENDER_SOFT)
-            painter.drawEllipse(QPointF(-w * 0.4, w * 0.4), w * 0.45, w * 0.45)
-        elif key == "rename":
-            # 标签/改名图标
-            painter.setBrush(Theme.LAVENDER_SOFT)
-            painter.drawRoundedRect(QRectF(-w * 0.9, -w * 0.55, w * 1.8, w * 1.1), 3 * s, 3 * s)
-            painter.drawLine(QPointF(-w * 0.45, 0), QPointF(w * 0.45, 0))
-
-    def _draw_food_popup_menu(self, painter: QPainter, s: float):
-        """绘制狐狸身旁弹出的精致磨砂小型食物菜单"""
+    def _draw_reference_snack_card(self, painter: QPainter, us: float):
+        """1:1 绘制参考图右下角：「今天想吃点什么？」1×4 横向点心卡片"""
         painter.save()
-        k = ease_out_back(self.food_menu_prog, overshoot=1.15)
-        painter.setOpacity(min(1.0, self.food_menu_prog * 1.15))
+        k = ease_out_back(self.food_card_prog, overshoot=1.12)
+        painter.setOpacity(min(1.0, self.food_card_prog * 1.15))
 
-        menu_r = self._get_food_menu_rect()
-        c = menu_r.center()
+        card = self._get_snack_card_rect()
+        c = card.center()
         painter.translate(c)
-        painter.scale(0.88 + 0.12 * k, 0.88 + 0.12 * k)
+        painter.scale(0.90 + 0.10 * k, 0.90 + 0.10 * k)
         painter.translate(-c)
 
-        # 柔和投影
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(Theme.SHADOW_SOFT)
-        painter.drawRoundedRect(menu_r.translated(0, 3 * s), Theme.RADIUS_MENU * s, Theme.RADIUS_MENU * s)
+        self._draw_frosted_card(painter, card, 20.0 * us)
 
-        # 奶油白磨砂卡片 + 细腻薄荷描边
-        painter.setBrush(Theme.CREAM_WHITE)
-        painter.setPen(QPen(Theme.MINT_BORDER, Theme.PEN_WIDTH_CARD * s))
-        painter.drawRoundedRect(menu_r, Theme.RADIUS_MENU * s, Theme.RADIUS_MENU * s)
-
-        # 顶部小标题
-        painter.setPen(Theme.TEXT_SECONDARY)
-        painter.setFont(QFont("Microsoft YaHei", max(7, int(8 * s)), QFont.Weight.Bold))
+        # 左上角小标题「今天想吃点什么？」
+        painter.setPen(Theme.TEXT_TITLE)
+        painter.setFont(QFont("Microsoft YaHei", max(8, int(8.5 * us)), QFont.Weight.Bold))
         painter.drawText(
-            QRectF(menu_r.left() + 10 * s, menu_r.top() + 6 * s, menu_r.width() - 20 * s, 18 * s),
-            Qt.AlignmentFlag.AlignCenter,
-            "点选小点心投喂",
+            QRectF(card.left() + 14 * us, card.top() + 7 * us, card.width() - 28 * us, 18 * us),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            "今天想吃点什么？",
         )
 
-        # 4 个食物选项胶囊行
-        painter.setFont(QFont("Microsoft YaHei", max(8, int(8.5 * s)), QFont.Weight.Bold))
-        for item, row_r in self._get_food_item_rects():
-            painter.setPen(QPen(Theme.CHAMPAGNE_GOLD, 1.1 * s))
-            painter.setBrush(Theme.CREAM_WARM)
-            painter.drawRoundedRect(row_r, 9 * s, 9 * s)
+        # 4 个横向排列的点心项（圆角方形浅底板 + 手绘扁平图标 + 下方文字）
+        painter.setFont(QFont("Microsoft YaHei", max(7, int(8.0 * us)), QFont.Weight.Bold))
+        for idx, (item, tile_r, hit_r) in enumerate(self._get_snack_tile_rects()):
+            is_hov = (self.hovered_snack_idx == idx)
+            painter.setPen(QPen(Theme.MINT_BTN_BG if is_hov else Theme.BORDER_WARM, 1.2))
+            painter.setBrush(Theme.MINT_BTN_BG if is_hov else Theme.TILE_BG)
+            painter.drawRoundedRect(tile_r, 11.0 * us, 11.0 * us)
 
-            # 统一风格的迷你食物图标
-            icon_pt = QPointF(row_r.left() + 14 * s, row_r.center().y())
-            self._draw_food_mini_icon(painter, item, icon_pt, 7.5 * s)
+            self._draw_snack_illustration(painter, item.key, tile_r.center(), tile_r.width() * 0.34)
 
-            painter.setPen(Theme.TEXT_PRIMARY)
-            painter.drawText(
-                QRectF(row_r.left() + 26 * s, row_r.top(), row_r.width() - 30 * s, row_r.height()),
-                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                item.name,
-            )
+            painter.setPen(Theme.TEXT_TITLE)
+            lbl_r = QRectF(hit_r.left(), tile_r.bottom() + 3 * us, hit_r.width(), 16 * us)
+            painter.drawText(lbl_r, Qt.AlignmentFlag.AlignCenter, item.name)
 
         painter.restore()
 
-    def _draw_food_mini_icon(self, painter: QPainter, item: FoodItem, center: QPointF, radius: float):
+    def _draw_snack_illustration(self, painter: QPainter, key: str, center: QPointF, r: float):
+        """绘制参考图同款 4 种点心扁平插画图标：小饼干、三文鱼、甜桃子、热可可"""
         painter.save()
-        painter.setPen(QPen(Theme.TEXT_PRIMARY, 1.3))
-        painter.setBrush(item.color_main)
-        painter.drawRoundedRect(
-            QRectF(center.x() - radius, center.y() - radius * 0.75, radius * 2, radius * 1.5),
-            radius * 0.5,
-            radius * 0.5,
-        )
-        painter.setBrush(item.color_sub)
-        painter.drawEllipse(QPointF(center.x(), center.y() - radius * 0.55), radius * 0.42, radius * 0.42)
+        cx, cy = center.x(), center.y()
+
+        if key == "cookie":
+            # 小饼干：暖棕黄曲奇 + 巧克力碎点
+            painter.setPen(QPen(QColor(180, 132, 76), 1.1))
+            painter.setBrush(QColor(234, 190, 126))
+            painter.drawEllipse(center, r, r)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(122, 82, 48))
+            for dx, dy in ((-0.35, -0.25), (0.28, -0.30), (-0.10, 0.32), (0.32, 0.22)):
+                painter.drawEllipse(QPointF(cx + dx * r, cy + dy * r), r * 0.14, r * 0.14)
+
+        elif key == "salmon":
+            # 三文鱼：珊瑚粉圆角块 + 三道斜向白色脂肪纹理
+            rect = QRectF(cx - r * 1.05, cy - r * 0.68, r * 2.1, r * 1.36)
+            painter.setPen(QPen(QColor(216, 118, 98), 1.1))
+            painter.setBrush(QColor(244, 152, 132))
+            painter.drawRoundedRect(rect, r * 0.38, r * 0.38)
+            painter.setPen(QPen(QColor(255, 245, 240, 220), 1.5))
+            for ox in (-0.45 * r, 0.0, 0.45 * r):
+                painter.drawLine(
+                    QPointF(cx + ox - 0.2 * r, cy - 0.45 * r),
+                    QPointF(cx + ox + 0.2 * r, cy + 0.45 * r),
+                )
+
+        elif key == "peach":
+            # 甜桃子：粉嫩水蜜桃 + 顶部薄荷绿小叶子
+            painter.setPen(QPen(QColor(218, 128, 142), 1.1))
+            painter.setBrush(QColor(246, 176, 186))
+            painter.drawEllipse(QPointF(cx, cy + r * 0.1), r * 0.92, r * 0.86)
+            # 绿叶
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(138, 198, 166))
+            painter.drawEllipse(QPointF(cx + r * 0.25, cy - r * 0.72), r * 0.38, r * 0.20)
+
+        elif key == "cocoa":
+            # 热可可：薄荷灰绿马克杯 + 右侧杯柄 + 两缕热气
+            cup_r = QRectF(cx - r * 0.75, cy - r * 0.35, r * 1.4, r * 1.25)
+            painter.setPen(QPen(QColor(126, 158, 146), 1.3))
+            painter.setBrush(QColor(192, 218, 208))
+            painter.drawRoundedRect(cup_r, r * 0.28, r * 0.28)
+            # 杯柄
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawArc(
+                QRectF(cx + r * 0.42, cy - r * 0.15, r * 0.55, r * 0.75),
+                -90 * 16,
+                180 * 16,
+            )
+            # 两缕竖向热气
+            painter.setPen(QPen(QColor(150, 168, 160, 190), 1.2))
+            painter.drawLine(QPointF(cx - r * 0.25, cy - r * 0.55), QPointF(cx - r * 0.25, cy - r * 0.92))
+            painter.drawLine(QPointF(cx + r * 0.15, cy - r * 0.55), QPointF(cx + r * 0.15, cy - r * 0.92))
+
         painter.restore()
 
-    def _draw_feeding_flight(self, painter: QPainter, s: float):
-        """
-        绘制 6 阶段喂食动画中的食物飞行与被吃掉效果：
-        1. 0.00 ~ 0.18s：从菜单位置轻轻浮起；
-        2. 0.18 ~ 0.62s：沿柔和二次贝塞尔曲线飞向狐狸嘴边；
-        3. 0.62 ~ 0.86s：在嘴边逐渐缩小、淡出（被吃掉）。
-        """
+    def _draw_size_slider_card(self, painter: QPainter, us: float):
+        """绘制点击 ··· 弹出的「滑块无级调大小 (25% ~ 150%) + 饱食/心情简报」卡片"""
+        painter.save()
+        k = ease_out_back(self.size_card_prog, overshoot=1.10)
+        painter.setOpacity(min(1.0, self.size_card_prog * 1.15))
+
+        card = self._get_size_slider_card_rect()
+        c = card.center()
+        painter.translate(c)
+        painter.scale(0.90 + 0.10 * k, 0.90 + 0.10 * k)
+        painter.translate(-c)
+
+        self._draw_frosted_card(painter, card, 18.0 * us)
+
+        # 标题行：小狐狸大小 | 百分比
+        painter.setPen(Theme.TEXT_TITLE)
+        painter.setFont(QFont("Microsoft YaHei", max(7, int(8.2 * us)), QFont.Weight.Bold))
+        painter.drawText(
+            QRectF(card.left() + 14 * us, card.top() + 8 * us, card.width() - 28 * us, 18 * us),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            f"小狐狸大小：{int(self.scale_factor * 100)}%",
+        )
+        painter.setPen(Theme.TEXT_SUB)
+        painter.setFont(QFont("Microsoft YaHei", max(7, int(7.5 * us))))
+        painter.drawText(
+            QRectF(card.left() + 14 * us, card.top() + 8 * us, card.width() - 28 * us, 18 * us),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            f"饱食 {int(self.hunger)}%",
+        )
+
+        # 滑块轨道 (25% ~ 150%)
+        track = self._get_slider_track_rect()
+        bar_h = 6.0 * us
+        bar_y = track.center().y() - bar_h * 0.5
+        bar_r = QRectF(track.left(), bar_y, track.width(), bar_h)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(224, 228, 222))
+        painter.drawRoundedRect(bar_r, bar_h * 0.5, bar_h * 0.5)
+
+        ratio = max(0.0, min(1.0, (self.scale_factor - 0.25) / 1.25))
+        fill_w = max(bar_h, track.width() * ratio)
+        painter.setBrush(Theme.MINT_BTN_BG)
+        painter.drawRoundedRect(QRectF(track.left(), bar_y, fill_w, bar_h), bar_h * 0.5, bar_h * 0.5)
+
+        # 滑块圆形手柄
+        knob_x = track.left() + track.width() * ratio
+        knob_r = 7.5 * us
+        painter.setBrush(QColor(255, 255, 255))
+        painter.setPen(QPen(Theme.ICON_STROKE, 1.6 * us))
+        painter.drawEllipse(QPointF(knob_x, track.center().y()), knob_r, knob_r)
+
+        painter.restore()
+
+    def _draw_feeding_flight(self, painter: QPainter, us: float):
         t = self.feeding_elapsed
-        if t > 0.86 or self.feeding_food is None:
+        if t > 0.86 or self.feeding_snack is None:
             return
 
         p0 = self.feeding_start_pt
-        p_float = QPointF(p0.x(), p0.y() - 16.0 * s)
+        p_float = QPointF(p0.x(), p0.y() - 14.0 * us)
         p_end = self.feeding_mouth_pt
-        ctrl = QPointF((p_float.x() + p_end.x()) * 0.5, min(p_float.y(), p_end.y()) - 42.0 * s)
-
-        scale = 1.0
-        alpha = 1.0
+        ctrl = QPointF((p_float.x() + p_end.x()) * 0.5, min(p_float.y(), p_end.y()) - 36.0 * us)
 
         if t <= 0.18:
             k = ease_out_cubic(t / 0.18)
-            cur_pt = QPointF(p0.x(), p0.y() - 16.0 * s * k)
-            scale = 0.85 + 0.25 * k
+            cur_pt = QPointF(p0.x(), p0.y() - 14.0 * us * k)
+            scale = 0.85 + 0.20 * k
+            alpha = 1.0
         elif t <= 0.62:
             k = ease_in_out_cubic((t - 0.18) / 0.44)
             cur_pt = bezier_quad(p_float, ctrl, p_end, k)
-            scale = 1.10
+            scale = 1.05
+            alpha = 1.0
         else:
             k = ease_in_out_cubic((t - 0.62) / 0.24)
             cur_pt = p_end
-            scale = max(0.1, 1.10 * (1.0 - k))
+            scale = max(0.1, 1.05 * (1.0 - k))
             alpha = max(0.0, 1.0 - k)
 
         painter.save()
         painter.setOpacity(alpha)
-        self._draw_food_mini_icon(painter, self.feeding_food, cur_pt, 11.5 * s * scale)
+        self._draw_snack_illustration(painter, self.feeding_snack.key, cur_pt, 11.0 * us * scale)
         painter.restore()
 
     def _draw_cute_poop(self, painter: QPainter, px: float, py: float, s: float):
         painter.save()
-        painter.setPen(QPen(Theme.TEXT_PRIMARY, 1.4 * s))
-        painter.setBrush(QColor(166, 118, 86))
-        painter.drawRoundedRect(QRectF(px - 12 * s, py + 2 * s, 24 * s, 8 * s), 4 * s, 4 * s)
-        painter.drawRoundedRect(QRectF(px - 9 * s, py - 4 * s, 18 * s, 7.5 * s), 3.5 * s, 3.5 * s)
-        painter.drawEllipse(QRectF(px - 4.5 * s, py - 9.5 * s, 9 * s, 6.5 * s))
+        painter.setPen(QPen(Theme.ICON_STROKE, 1.3 * s))
+        painter.setBrush(QColor(172, 128, 96))
+        painter.drawRoundedRect(QRectF(px - 10 * s, py + 2 * s, 20 * s, 6.5 * s), 3 * s, 3 * s)
+        painter.drawRoundedRect(QRectF(px - 7.5 * s, py - 3 * s, 15 * s, 6 * s), 3 * s, 3 * s)
+        painter.drawEllipse(QRectF(px - 4 * s, py - 7.5 * s, 8 * s, 5.5 * s))
         painter.restore()
 
     def _draw_gentle_particles(self, painter: QPainter):
-        """绘制细小、柔和、低饱和的小爱心、四角星与香槟金微光点"""
         for pt in self.particles:
             prog = pt["life"] / pt["max_life"]
             alpha = math.sin(prog * math.pi)
             col = QColor(pt["color"])
-            col.setAlpha(int(215 * max(0.0, min(1.0, alpha))))
+            col.setAlpha(int(210 * max(0.0, min(1.0, alpha))))
 
             painter.save()
             painter.translate(pt["x"], pt["y"])
@@ -1978,63 +1949,36 @@ class ShajinFoxPet(QWidget):
             painter.restore()
 
     def _draw_speech_bubble(
-        self, painter: QPainter, cx: float, cy: float, fw: float, fh: float, s: float
+        self, painter: QPainter, cx: float, cy: float, fw: float, fh: float, us: float
     ):
-        """
-        绘制小巧圆角对话气泡：
-        - 淡入、微缩放、轻微上浮；
-        - 靠近狐狸出现，若靠近屏幕顶部则自动下移，绝不越界。
-        """
         painter.save()
         k = ease_out_cubic(self.bubble_alpha_prog)
         painter.setOpacity(k)
 
-        font = QFont("Microsoft YaHei", max(8, int(9 * s)), QFont.Weight.Bold)
+        font = QFont("Microsoft YaHei", max(8, int(8.5 * us)), QFont.Weight.Bold)
         painter.setFont(font)
         fm = painter.fontMetrics()
 
-        max_bw = int(248 * s)
+        max_bw = int(215 * us)
         text_bound = fm.boundingRect(
-            QRect(0, 0, max_bw - int(24 * s), 200),
+            QRect(0, 0, max_bw - int(22 * us), 160),
             Qt.TextFlag.TextWordWrap,
             self.bubble_text,
         )
-        bw = max(int(96 * s), min(max_bw, text_bound.width() + int(26 * s)))
-        bh = max(int(32 * s), text_bound.height() + int(16 * s))
+        bw = max(int(84 * us), min(max_bw, text_bound.width() + int(24 * us)))
+        bh = max(int(28 * us), text_bound.height() + int(12 * us))
 
-        bx = max(8.0, min(self.width() - bw - 8.0, cx - bw / 2.0))
-        float_up = (1.0 - k) * 6.0 * s
-        ideal_by = cy - fh * 0.48 - bh - 6.0 * s + float_up
-        # 防止超出窗口/屏幕顶部
-        by = max(6.0, min(self.height() - bh - 12.0, ideal_by))
+        bx = max(6.0, min(self.width() - bw - 6.0, cx - bw * 0.5))
+        float_up = (1.0 - k) * 5.0 * us
+        ideal_by = cy - fh * 0.48 - bh - 5.0 * us + float_up
+        by = max(4.0, min(self.height() - bh - 10.0, ideal_by))
 
         rect = QRectF(bx, by, bw, bh)
-        c = rect.center()
-        painter.translate(c)
-        painter.scale(0.92 + 0.08 * k, 0.92 + 0.08 * k)
-        painter.translate(-c)
+        self._draw_frosted_card(painter, rect, bh * 0.48)
 
-        # 柔和投影
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(Theme.SHADOW_SOFT)
-        painter.drawRoundedRect(rect.translated(0, 2.5 * s), Theme.RADIUS_BUBBLE * s, Theme.RADIUS_BUBBLE * s)
-
-        # 奶油白磨砂气泡底 + 薄荷绿细腻描边
-        path = QPainterPath()
-        path.addRoundedRect(rect, Theme.RADIUS_BUBBLE * s, Theme.RADIUS_BUBBLE * s)
-        tail_x = max(bx + 18 * s, min(bx + bw - 18 * s, cx))
-        path.moveTo(tail_x - 6 * s, by + bh)
-        path.lineTo(tail_x, by + bh + 6 * s)
-        path.lineTo(tail_x + 6 * s, by + bh)
-        path.closeSubpath()
-
-        painter.setBrush(Theme.CREAM_WHITE)
-        painter.setPen(QPen(Theme.MINT_BORDER, Theme.PEN_WIDTH_CARD * s))
-        painter.drawPath(path)
-
-        painter.setPen(Theme.TEXT_PRIMARY)
+        painter.setPen(Theme.TEXT_TITLE)
         painter.drawText(
-            rect.adjusted(10 * s, 5 * s, -10 * s, -5 * s),
+            rect.adjusted(8 * us, 3 * us, -8 * us, -3 * us),
             Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
             self.bubble_text,
         )
